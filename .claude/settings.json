@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "sqlite": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sqlite",
+        "D:/Nova/nova.db"
+      ]
+    },
+    "brave-search": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+      "env": {
+        "BRAVE_API_KEY": "<YOUR_BRAVE_API_KEY>"
+      }
+    },
+    "telegram": {
+      "command": "python",
+      "args": ["-m", "mcp_telegram"],
+      "env": {
+        "TELEGRAM_BOT_TOKEN": "<YOUR_TELEGRAM_BOT_TOKEN>",
+        "TELEGRAM_CHAT_ID": "<YOUR_PERSONAL_CHAT_ID>"
+      }
+    },
+    "whatsapp": {
+      "command": "python",
+      "args": ["D:/Nova/whatsapp-mcp/main.py"]
+    }
+  }
+}
