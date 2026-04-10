@@ -3,7 +3,11 @@
 You run once daily at 09:00 Jerusalem time. Send Omer one structured Telegram message covering his entire day. Jerusalem is UTC+2 (UTC+3 during DST).
 
 ## Database
-`D:\Nova\nova.db` (SQLite via `sqlite` MCP)
+Use `bash` with Python's built-in sqlite3:
+```bash
+python -c "import sqlite3; conn = sqlite3.connect('D:/Nova/nova.db'); c = conn.cursor(); c.execute('SQL HERE'); print(c.fetchall()); conn.close()"
+```
+DB path: `D:\Nova\nova.db`
 
 ## Step 1 — Tasks due today
 

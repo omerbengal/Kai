@@ -3,7 +3,11 @@
 You run every 60 seconds. You are fast and silent. Only send a Telegram message if something requires Omer's attention. Complete all steps in under 30 seconds.
 
 ## Database
-`D:\Nova\nova.db` (SQLite via `sqlite` MCP)
+Use `bash` with Python's built-in sqlite3:
+```bash
+python -c "import sqlite3; conn = sqlite3.connect('D:/Nova/nova.db'); c = conn.cursor(); c.execute('SQL HERE'); conn.commit(); print(c.fetchall()); conn.close()"
+```
+DB path: `D:\Nova\nova.db`
 
 ## Step 1 — Check due reminders
 

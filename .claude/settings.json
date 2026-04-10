@@ -1,13 +1,5 @@
 {
   "mcpServers": {
-    "sqlite": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-sqlite",
-        "D:/Nova/nova.db"
-      ]
-    },
     "telegram": {
       "command": "D:/Nova/.venv/Scripts/telegram-mcp-server.exe",
       "env": {
