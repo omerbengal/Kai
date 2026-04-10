@@ -68,6 +68,18 @@ WHERE p.name LIKE '%<name>%' OR pn.nickname LIKE '%<name>%';
 
 Reply: "Sent WhatsApp to {name}: '{message}'"
 
+### Read WhatsApp Messages
+Triggered by: "Any WhatsApp messages?", "Did [person] reply?", "Check my WhatsApp"
+
+Use `whatsapp` MCP to fetch recent messages. If checking for a specific person, look up their phone:
+```sql
+SELECT p.name, p.phone
+FROM people p
+LEFT JOIN people_nicknames pn ON p.id = pn.person_id
+WHERE p.name LIKE '%<name>%' OR pn.nickname LIKE '%<name>%';
+```
+Summarise new messages concisely.
+
 ### Web Search
 Triggered by: "Search for X", "What is X?", "Find me X", "Best X in Y"
 
@@ -98,9 +110,10 @@ VALUES (...);
 Triggered by: "What do I have today?", "Any reminders?", "What's pending?"
 
 ```sql
+-- Jerusalem date: UTC+2 standard (use '+3 hours' during DST — check memory for current offset)
 SELECT t.title, t.priority, d.name as domain, t.due_at
 FROM tasks t LEFT JOIN domains d ON t.domain_id = d.id
-WHERE t.status = 'open' AND date(t.due_at) = date('now')
+WHERE t.status = 'open' AND date(t.due_at, '+2 hours') = date('now', '+2 hours')
 ORDER BY t.priority DESC;
 ```
 
@@ -109,6 +122,8 @@ SELECT message, trigger_at FROM reminders
 WHERE status = 'pending' AND trigger_at >= datetime('now')
 ORDER BY trigger_at ASC LIMIT 10;
 ```
+
+When displaying results, convert UTC due times to Jerusalem local time (add 2 hours standard / 3 hours DST) before replying to Omer.
 
 ### Google Calendar
 Triggered by: "Add to calendar", "What's on my calendar?", "Schedule X"
