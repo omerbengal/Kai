@@ -1,3 +1,6 @@
+PRAGMA foreign_keys = ON;
+PRAGMA journal_mode = WAL;
+
 -- Lookup tables
 CREATE TABLE IF NOT EXISTS relationship_types (
     id   INTEGER PRIMARY KEY,
@@ -20,7 +23,7 @@ CREATE TABLE IF NOT EXISTS people (
     name                 TEXT NOT NULL,
     relationship_id      INTEGER REFERENCES relationship_types(id),
     birthday             DATE,
-    remind_birthday_days INTEGER DEFAULT 3,
+    remind_birthday_days INTEGER DEFAULT 3 CHECK (remind_birthday_days BETWEEN 0 AND 365),
     phone                TEXT,
     telegram_username    TEXT,
     email                TEXT,
@@ -30,7 +33,8 @@ CREATE TABLE IF NOT EXISTS people (
 CREATE TABLE IF NOT EXISTS people_nicknames (
     id        INTEGER PRIMARY KEY,
     person_id INTEGER NOT NULL REFERENCES people(id),
-    nickname  TEXT NOT NULL
+    nickname  TEXT NOT NULL,
+    UNIQUE(person_id, nickname)
 );
 
 CREATE TABLE IF NOT EXISTS people_notes (
@@ -46,7 +50,7 @@ CREATE TABLE IF NOT EXISTS reminders (
     id         INTEGER PRIMARY KEY,
     message    TEXT NOT NULL,
     trigger_at DATETIME NOT NULL,
-    recurrence TEXT    CHECK (recurrence IN ('daily','weekly','monthly','yearly')),
+    recurrence TEXT    CHECK (recurrence IN ('daily','weekly','monthly','yearly')), -- NULL = one-shot (non-recurring)
     status     TEXT    DEFAULT 'pending' CHECK (status IN ('pending','fired','dismissed')),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -56,7 +60,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     id         INTEGER PRIMARY KEY,
     title      TEXT NOT NULL,
     notes      TEXT,
-    priority   INTEGER DEFAULT 5 CHECK (priority BETWEEN 0 AND 11),
+    priority   INTEGER DEFAULT 5 CHECK (priority BETWEEN 0 AND 11), -- 0=lowest, 10-11=critical
     domain_id  INTEGER REFERENCES domains(id),
     due_at     DATETIME,
     status     TEXT DEFAULT 'open' CHECK (status IN ('open','done','cancelled')),
@@ -84,3 +88,8 @@ CREATE TABLE IF NOT EXISTS action_log (
     details    TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Indexes for heartbeat agent performance (runs every 60 seconds)
+CREATE INDEX IF NOT EXISTS idx_reminders_status_trigger   ON reminders(status, trigger_at);
+CREATE INDEX IF NOT EXISTS idx_tasks_status_due           ON tasks(status, due_at);
+CREATE INDEX IF NOT EXISTS idx_task_notifications_task_id ON task_notifications(task_id);
