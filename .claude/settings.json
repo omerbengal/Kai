@@ -16,15 +16,14 @@
       }
     },
     "telegram": {
-      "command": "python",
-      "args": ["-m", "mcp_telegram"],
+      "command": "D:/Nova/.venv/Scripts/telegram-mcp-server.exe",
       "env": {
         "TELEGRAM_BOT_TOKEN": "<YOUR_TELEGRAM_BOT_TOKEN>",
         "TELEGRAM_CHAT_ID": "<YOUR_PERSONAL_CHAT_ID>"
       }
     },
     "whatsapp": {
-      "command": "python",
+      "command": "D:/Nova/.venv/Scripts/python.exe",
       "args": ["D:/Nova/whatsapp-mcp/main.py"]
     }
   }

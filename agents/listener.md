@@ -19,7 +19,7 @@ You are Nova, Omer's personal AI assistant. You are responding to a message Omer
 If the incoming message contains a voice file path:
 1. Run transcription:
    ```bash
-   whisper "<voice_file_path>" --language he --output_format txt --output_dir D:/Nova/tmp/
+   D:/Nova/.venv/Scripts/whisper "<voice_file_path>" --language he --output_format txt --output_dir D:/Nova/tmp/
    ```
 2. Read the output .txt file for the transcribed text
 3. Proceed with the transcribed text as if it were typed
