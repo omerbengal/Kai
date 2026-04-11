@@ -9,6 +9,7 @@ Called by the Telegram plugin (server.ts) via child_process.exec.
 """
 import argparse
 import json
+import re
 import sqlite3
 import sys
 import io
@@ -17,7 +18,6 @@ from typing import Optional
 
 DB_PATH = 'D:/Kai/kai.db'
 BOT_TOKEN = __import__("os").environ["KAI_TELEGRAM_BOT_TOKEN"]
-CHAT_ID = __import__("os").environ.get("KAI_TELEGRAM_CHAT_ID", "")
 
 
 class MessageNotFound(Exception):
@@ -114,7 +114,7 @@ def _apply_remove_action(conn: sqlite3.Connection, msg: sqlite3.Row, reaction: s
     text = msg['text'] or ''
     msg_type, content = _parse_message_type(text)
     if msg_type == 'reminder' and content:
-        _mark_reminder(conn, content, 'fired')
+        _mark_reminder(conn, content, 'pending')
     elif msg_type == 'task' and content:
         _mark_task(conn, content, 'open')
 
@@ -125,7 +125,6 @@ def _parse_message_type(text: str):
     For reminders: content = reminder message text.
     For tasks: content = task title.
     """
-    import re
     if text.startswith('⏰ '):
         return 'reminder', text[len('⏰ '):]
     m = re.match(r'^📋 \[P\d+\] (.+?) — due in ~[\d.]+h$', text)

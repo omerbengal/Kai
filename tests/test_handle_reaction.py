@@ -1,9 +1,7 @@
 """Tests for handle_reaction.py — run with: python -m pytest D:/Kai/tests/test_handle_reaction.py -v"""
 import json
-import os
 import sqlite3
 import sys
-import tempfile
 
 import pytest
 
