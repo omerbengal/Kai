@@ -56,10 +56,13 @@ No changes to `tasks` or `reminders` schema — existing statuses suffice:
 python D:/Kai/scripts/handle_reaction.py \
   --chat_id <chat_id> \
   --message_id <telegram_message_id> \
-  --reaction <emoji>
+  --reaction <emoji> \
+  --mode <add|remove>
 ```
 
-**Algorithm:**
+`--mode add` (default) = user added a reaction. `--mode remove` = user removed a reaction.
+
+**Algorithm (add):**
 
 1. Look up `messages` by `telegram_message_id = message_id`
    - If not found: log to stderr, send Telegram error, exit
@@ -80,6 +83,16 @@ python D:/Kai/scripts/handle_reaction.py \
    - Set `status = 'done'`
 6. Log to `action_log`
 7. On any exception: send Telegram error message, exit 1
+
+**Algorithm (remove):**
+
+1. Look up `messages` by `telegram_message_id = message_id`
+2. Remove `reaction` from `messages.reactions` JSON array
+3. Reverse the original action:
+   - `⏰` one-shot reminder with `status = 'dismissed'` → set back to `fired`
+   - `📋`/`⚠️` task with `status = 'done'` → set back to `open`
+   - Otherwise → nothing further
+4. Log to `action_log`
 
 **Error handling:** all exceptions caught at top level, reported via Telegram, never crash silently.
 
@@ -106,10 +119,20 @@ bot.on('message_reaction', async ctx => {
   const chatId = String(ctx.chat?.id ?? ctx.update.message_reaction?.chat?.id ?? '');
   const messageId = String(ctx.update.message_reaction?.message_id ?? '');
   const newReactions = ctx.update.message_reaction?.new_reaction ?? [];
+  const oldReactions = ctx.update.message_reaction?.old_reaction ?? [];
+  // Added reactions
   for (const r of newReactions) {
     const emoji = r.type === 'emoji' ? r.emoji : '';
     if (!emoji) continue;
-    exec(`python D:/Kai/scripts/handle_reaction.py --chat_id ${chatId} --message_id ${messageId} --reaction "${emoji}"`,
+    exec(`python D:/Kai/scripts/handle_reaction.py --chat_id ${chatId} --message_id ${messageId} --reaction "${emoji}" --mode add`,
+      (err) => { if (err) console.error('[reaction]', err.message); }
+    );
+  }
+  // Removed reactions
+  for (const r of oldReactions) {
+    const emoji = r.type === 'emoji' ? r.emoji : '';
+    if (!emoji) continue;
+    exec(`python D:/Kai/scripts/handle_reaction.py --chat_id ${chatId} --message_id ${messageId} --reaction "${emoji}" --mode remove`,
       (err) => { if (err) console.error('[reaction]', err.message); }
     );
   }
@@ -151,8 +174,18 @@ Omer reacts on Telegram
 
 ---
 
-## Out of Scope
+## Un-reacting (Removing a Reaction)
 
-- Reacting to Omer's own outgoing messages (only reactions to bot messages are tracked — bot only receives `message_reaction` for messages in chats where it participates)
-- Un-reacting (removing a reaction) — ignored for now
-- Multiple simultaneous reactions to the same message — each emoji appended separately
+When `old_reaction` is non-empty and `new_reaction` is empty, the user removed a reaction.
+
+**Behavior:** reverse the original action:
+- Task that was marked `done` → revert to `open`
+- Reminder that was marked `dismissed` → revert to `fired`
+- Remove the emoji from `messages.reactions`
+
+The script checks `--mode` arg: `add` (default) or `remove`. On removal, it looks up the emoji in `messages.reactions` and removes it, then reverses the status change.
+
+## Notes
+
+- Reactions on Omer's own messages (direction='incoming') are logged like any other unrecognized message — no task/reminder action, just the emoji recorded in `messages.reactions`.
+- Multiple emoji reactions on the same message: each handled independently.
