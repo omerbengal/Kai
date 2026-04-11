@@ -435,7 +435,7 @@ def test_reaction_on_recurring_reminder_does_not_dismiss(tmp_path):
     assert status == 'pending'  # unchanged
 
 
-def test_unreact_on_reminder_reverts_to_fired(tmp_path):
+def test_unreact_on_reminder_reverts_to_pending(tmp_path):
     db = make_db(tmp_path)
     conn = sqlite3.connect(db)
     conn.execute("INSERT INTO messages (telegram_message_id, direction, text, reactions) VALUES (12, 'outgoing', '⏰ לשלוח הודעה לרופא', '[\"👍\"]')")
@@ -450,7 +450,7 @@ def test_unreact_on_reminder_reverts_to_fired(tmp_path):
     conn = sqlite3.connect(db)
     status = conn.execute("SELECT status FROM reminders WHERE message = 'לשלוח הודעה לרופא'").fetchone()[0]
     conn.close()
-    assert status == 'fired'
+    assert status == 'pending'  # reverts to pending so heartbeat can re-fire it
 ```
 
 - [ ] **Step 2: Run reminder tests**
