@@ -70,7 +70,7 @@ def update_reactions_remove(conn: sqlite3.Connection, msg_id: int, current: Opti
 
 def log_action(conn: sqlite3.Connection, action: str, details: str) -> None:
     conn.execute(
-        "INSERT INTO action_log (agent, action, details) VALUES ('listener', ?, ?)",
+        "INSERT INTO action_log (agent, action, details) VALUES ('handle_reaction', ?, ?)",
         (action, details)
     )
 
@@ -151,10 +151,14 @@ def _mark_reminder(conn: sqlite3.Connection, message_text: str, new_status: str)
 
 
 def _mark_task(conn: sqlite3.Connection, title: str, new_status: str) -> None:
-    """Mark matching task with the given status."""
+    """Mark matching task with the given status.
+    Only transitions: open→done (add reaction) or done→open (remove reaction).
+    Does not touch cancelled tasks.
+    """
+    expected_current = 'open' if new_status == 'done' else 'done'
     conn.execute(
-        'UPDATE tasks SET status = ? WHERE title = ? AND status != ?',
-        (new_status, title, new_status)
+        'UPDATE tasks SET status = ? WHERE title = ? AND status = ?',
+        (new_status, title, expected_current)
     )
 
 

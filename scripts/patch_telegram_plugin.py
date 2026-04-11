@@ -11,9 +11,6 @@ import io
 import glob
 import os
 
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
-
 PLUGIN_CACHE = r"C:\Users\Omer\.claude\plugins\cache\claude-plugins-official\telegram"
 
 MARKER = "reply_to_message_id"
@@ -118,6 +115,9 @@ def patch_file(path: str) -> bool:
 
 
 def main():
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8")
+
     versions = sorted(glob.glob(os.path.join(PLUGIN_CACHE, "*", "server.ts")))
     if not versions:
         print("[patch_telegram] no server.ts found", file=sys.stderr)

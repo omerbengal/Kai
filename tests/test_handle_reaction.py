@@ -198,6 +198,25 @@ def test_unreact_on_task_reverts_to_open(tmp_path):
     assert status == 'open'
 
 
+def test_unreact_on_recurring_reminder_does_not_change_status(tmp_path):
+    """Removing a reaction from a recurring reminder leaves status unchanged."""
+    db = make_db(tmp_path)
+    conn = sqlite3.connect(db)
+    conn.execute("INSERT INTO messages (telegram_message_id, direction, text, reactions) VALUES (13, 'outgoing', '⏰ לשתות מים', '[\"✅\"]')")
+    conn.execute("INSERT INTO reminders (message, trigger_at, recurrence, status) VALUES ('לשתות מים', '2026-04-11 09:00:00', 'daily', 'pending')")
+    conn.commit()
+    conn.close()
+
+    import handle_reaction
+    handle_reaction.DB_PATH = db
+    handle_reaction.handle_remove(message_id=13, reaction='✅', chat_id='123')
+
+    conn = sqlite3.connect(db)
+    status = conn.execute("SELECT status FROM reminders WHERE message = 'לשתות מים'").fetchone()[0]
+    conn.close()
+    assert status == 'pending'  # recurring reminders are never status-changed, even on remove
+
+
 def test_reaction_on_unrecognized_message_only_logs(tmp_path):
     db = make_db(tmp_path)
     conn = sqlite3.connect(db)

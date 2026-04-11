@@ -89,7 +89,7 @@ python D:/Kai/scripts/handle_reaction.py \
 1. Look up `messages` by `telegram_message_id = message_id`
 2. Remove `reaction` from `messages.reactions` JSON array
 3. Reverse the original action:
-   - `⏰` one-shot reminder with `status = 'dismissed'` → set back to `fired`
+   - `⏰` one-shot reminder with `status = 'dismissed'` → set back to `pending` (so heartbeat can re-fire it)
    - `📋`/`⚠️` task with `status = 'done'` → set back to `open`
    - Otherwise → nothing further
 4. Log to `action_log`
@@ -180,7 +180,7 @@ When `old_reaction` is non-empty and `new_reaction` is empty, the user removed a
 
 **Behavior:** reverse the original action:
 - Task that was marked `done` → revert to `open`
-- Reminder that was marked `dismissed` → revert to `fired`
+- Reminder that was marked `dismissed` → revert to `pending` (so heartbeat can re-fire it)
 - Remove the emoji from `messages.reactions`
 
 The script checks `--mode` arg: `add` (default) or `remove`. On removal, it looks up the emoji in `messages.reactions` and removes it, then reverses the status change.
