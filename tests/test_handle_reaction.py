@@ -142,3 +142,74 @@ def test_unreact_on_reminder_reverts_to_pending(tmp_path):
     status = conn.execute("SELECT status FROM reminders WHERE message = 'לשלוח הודעה לרופא'").fetchone()[0]
     conn.close()
     assert status == 'pending'  # reverts to pending so heartbeat can re-fire it
+
+
+def test_reaction_on_task_nudge_marks_done(tmp_path):
+    db = make_db(tmp_path)
+    conn = sqlite3.connect(db)
+    conn.execute("INSERT INTO messages (telegram_message_id, direction, text) VALUES (20, 'outgoing', '📋 [P7] לשלוח דוח שבועי — due in ~6h')")
+    conn.execute("INSERT INTO tasks (title, priority, status) VALUES ('לשלוח דוח שבועי', 7, 'open')")
+    conn.commit()
+    conn.close()
+
+    import handle_reaction
+    handle_reaction.DB_PATH = db
+    handle_reaction.handle_add(message_id=20, reaction='✅', chat_id='123')
+
+    conn = sqlite3.connect(db)
+    status = conn.execute("SELECT status FROM tasks WHERE title = 'לשלוח דוח שבועי'").fetchone()[0]
+    conn.close()
+    assert status == 'done'
+
+
+def test_reaction_on_overdue_task_marks_done(tmp_path):
+    db = make_db(tmp_path)
+    conn = sqlite3.connect(db)
+    conn.execute("INSERT INTO messages (telegram_message_id, direction, text) VALUES (21, 'outgoing', '⚠️ OVERDUE [P8]: לסיים פרויקט X')")
+    conn.execute("INSERT INTO tasks (title, priority, status) VALUES ('לסיים פרויקט X', 8, 'open')")
+    conn.commit()
+    conn.close()
+
+    import handle_reaction
+    handle_reaction.DB_PATH = db
+    handle_reaction.handle_add(message_id=21, reaction='👍', chat_id='123')
+
+    conn = sqlite3.connect(db)
+    status = conn.execute("SELECT status FROM tasks WHERE title = 'לסיים פרויקט X'").fetchone()[0]
+    conn.close()
+    assert status == 'done'
+
+
+def test_unreact_on_task_reverts_to_open(tmp_path):
+    db = make_db(tmp_path)
+    conn = sqlite3.connect(db)
+    conn.execute("INSERT INTO messages (telegram_message_id, direction, text, reactions) VALUES (22, 'outgoing', '📋 [P7] לשלוח דוח שבועי — due in ~6h', '[\"✅\"]')")
+    conn.execute("INSERT INTO tasks (title, priority, status) VALUES ('לשלוח דוח שבועי', 7, 'done')")
+    conn.commit()
+    conn.close()
+
+    import handle_reaction
+    handle_reaction.DB_PATH = db
+    handle_reaction.handle_remove(message_id=22, reaction='✅', chat_id='123')
+
+    conn = sqlite3.connect(db)
+    status = conn.execute("SELECT status FROM tasks WHERE title = 'לשלוח דוח שבועי'").fetchone()[0]
+    conn.close()
+    assert status == 'open'
+
+
+def test_reaction_on_unrecognized_message_only_logs(tmp_path):
+    db = make_db(tmp_path)
+    conn = sqlite3.connect(db)
+    conn.execute("INSERT INTO messages (telegram_message_id, direction, text) VALUES (30, 'outgoing', 'שלום! איך אני יכול לעזור?')")
+    conn.commit()
+    conn.close()
+
+    import handle_reaction
+    handle_reaction.DB_PATH = db
+    handle_reaction.handle_add(message_id=30, reaction='❤️', chat_id='123')
+
+    conn = sqlite3.connect(db)
+    reactions = conn.execute("SELECT reactions FROM messages WHERE telegram_message_id = 30").fetchone()[0]
+    conn.close()
+    assert json.loads(reactions) == ['❤️']  # logged, no error
