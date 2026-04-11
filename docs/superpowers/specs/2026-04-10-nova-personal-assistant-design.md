@@ -1,4 +1,4 @@
-# Nova — Personal AI Assistant: Design Spec
+# Kai — Personal AI Assistant: Design Spec
 **Date:** 2026-04-10  
 **Status:** Approved
 
@@ -6,7 +6,10 @@
 
 ## 1. Overview
 
-Nova is a 24/7 personal AI assistant built on Claude Code. It listens for commands via Telegram (text and voice), executes actions on the user's behalf (web search, WhatsApp, Google Calendar, etc.), proactively sends reminders and task nudges, and delivers a daily morning briefing. All structured data is persisted in a local SQLite database. User profile and preferences live in file-based memory.
+Kai is a 24/7 personal AI assistant built on Claude Code.
+It listens for commands via Telegram (text and voice), executes actions on the user's behalf (web search, WhatsApp, Google Calendar, etc.), proactively sends reminders and task nudges, and delivers a daily morning briefing.
+All structured data is persisted in a local SQLite database.
+User profile and preferences live in file-based memory.
 
 **User:** Omer (Jerusalem timezone, UTC+2)
 
@@ -14,7 +17,7 @@ Nova is a 24/7 personal AI assistant built on Claude Code. It listens for comman
 
 ## 2. Architecture
 
-Three stateless agents share a single SQLite database (`D:\Nova\nova.db`) as the source of truth.
+Three stateless agents share a single SQLite database (`D:\Kai\kai.db`) as the source of truth.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -40,7 +43,7 @@ Three stateless agents share a single SQLite database (`D:\Nova\nova.db`) as the
                          │ reads/writes
                          ▼
           ┌──────────────────────────┐
-          │       SQLite DB          │  D:\Nova\nova.db
+          │       SQLite DB          │  D:\Kai\kai.db
           │  tasks, reminders,       │
           │  people, notifications   │
           └──────────────┬───────────┘
@@ -62,7 +65,7 @@ Three stateless agents share a single SQLite database (`D:\Nova\nova.db`) as the
           └──────────────────────────┘
 
           ┌──────────────────────────┐
-          │   File-based Memory      │  C:\Users\Omer\.claude\projects\D--Nova\memory\
+          │   File-based Memory      │  C:\Users\Omer\.claude\projects\D--Kai\memory\
           │  preferences, profile,   │  loaded by all agents at startup
           │  user context            │
           └──────────────────────────┘
@@ -80,7 +83,7 @@ Three stateless agents share a single SQLite database (`D:\Nova\nova.db`) as the
 
 ## 3. SQLite Schema
 
-File: `D:\Nova\schema.sql`
+File: `D:\Kai\schema.sql`
 
 ```sql
 -- Lookup tables
@@ -205,7 +208,7 @@ Priority determines both which agent sends nudges and how far in advance.
 
 ## 5. Listener Agent
 
-**File:** `D:\Nova\agents\listener.md`
+**File:** `D:\Kai\agents\listener.md`
 
 **Trigger:** Incoming Telegram message (text or voice).
 
@@ -238,7 +241,7 @@ Priority determines both which agent sends nudges and how far in advance.
 
 ## 6. Heartbeat Agent
 
-**File:** `D:\Nova\agents\heartbeat.md`
+**File:** `D:\Kai\agents\heartbeat.md`
 
 **Trigger:** CronCreate, every 60 seconds.
 
@@ -264,7 +267,7 @@ Priority determines both which agent sends nudges and how far in advance.
 
 ## 7. Morning Briefing Agent
 
-**File:** `D:\Nova\agents\morning_briefing.md`
+**File:** `D:\Kai\agents\morning_briefing.md`
 
 **Trigger:** CronCreate at 07:00 UTC (09:00 Jerusalem) daily.
 
@@ -302,7 +305,7 @@ Empty sections are omitted. Message is kept concise.
 | `whatsapp-mcp` | Listener | Send and receive WhatsApp messages |
 | `google-calendar-mcp` | Listener + Morning Briefing | Read/create/update events |
 | `gmail-mcp` | Morning Briefing | Read important emails |
-| `sqlite-mcp` | All agents | Read/write `nova.db` |
+| `sqlite-mcp` | All agents | Read/write `kai.db` |
 | `whisper-mcp` | Listener | Transcribe voice messages |
 | `web-search` | Listener | Search the web |
 
@@ -316,8 +319,8 @@ Two layers:
 
 | Layer | Location | Contains |
 |---|---|---|
-| File-based memory | `C:\Users\Omer\.claude\projects\D--Nova\memory\` | User profile, preferences, timezone, hobbies, life goals, employer, context |
-| SQLite | `D:\Nova\nova.db` | Structured actionable data — people, tasks, reminders, notifications |
+| File-based memory | `C:\Users\Omer\.claude\projects\D--Kai\memory\` | User profile, preferences, timezone, hobbies, life goals, employer, context |
+| SQLite | `D:\Kai\kai.db` | Structured actionable data — people, tasks, reminders, notifications |
 
 The Listener Agent reads memory files on every invocation and writes updates when new facts are learned.
 
@@ -326,8 +329,8 @@ The Listener Agent reads memory files on every invocation and writes updates whe
 ## 10. Project Structure
 
 ```
-D:\Nova\
-  nova.db                        ← SQLite database (runtime)
+D:\Kai\
+  kai.db                        ← SQLite database (runtime)
   schema.sql                     ← DB schema (source of truth)
   seed.sql                       ← Initial lookup table values
   agents/

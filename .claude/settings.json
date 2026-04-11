@@ -1,15 +1,64 @@
 {
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python D:/Kai/scripts/patch_telegram_plugin.py",
+            "async": false
+          },
+          {
+            "type": "command",
+            "command": "[ -f D:/Kai/tmp/restart_sentinel ] && rm D:/Kai/tmp/restart_sentinel && python -c \"import urllib.request,json; urllib.request.urlopen(urllib.request.Request('https://api.telegram.org/bot${KAI_TELEGRAM_BOT_TOKEN}/sendMessage',json.dumps({'chat_id':'${KAI_TELEGRAM_CHAT_ID}','text':'קלוד עלה ✅'}).encode(),{'Content-Type':'application/json'}))\" || true",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__plugin_telegram_telegram__reply",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python D:/Kai/scripts/save_telegram_message.py --mode outgoing",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python D:/Kai/scripts/save_telegram_message.py --mode incoming",
+            "async": true
+          }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "GROQ_API_KEY": "<REDACTED_GROQ_KEY>"
+  },
   "mcpServers": {
     "telegram": {
-      "command": "D:/Nova/.venv/Scripts/telegram-mcp-server.exe",
+      "command": "D:/Kai/.venv/Scripts/telegram-mcp-server.exe",
       "env": {
         "TELEGRAM_BOT_TOKEN": "${KAI_TELEGRAM_BOT_TOKEN}",
         "TELEGRAM_CHAT_ID": "${KAI_TELEGRAM_CHAT_ID}"
       }
     },
     "whatsapp": {
-      "command": "D:/Nova/.venv/Scripts/python.exe",
-      "args": ["D:/Nova/whatsapp-mcp/main.py"]
+      "command": "uv",
+      "args": [
+        "--directory",
+        "D:/Kai/whatsapp-mcp/whatsapp-mcp-server",
+        "run",
+        "main.py"
+      ]
     }
   }
 }

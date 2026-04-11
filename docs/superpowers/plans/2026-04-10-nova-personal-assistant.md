@@ -1,27 +1,27 @@
-# Nova Personal Assistant — Implementation Plan
+# Kai Personal Assistant — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build Nova, a 24/7 personal AI assistant for Omer — three Claude Code agents (Listener, Heartbeat, Morning Briefing) sharing a SQLite database, orchestrated via Telegram.
+**Goal:** Build Kai, a 24/7 personal AI assistant for Omer — three Claude Code agents (Listener, Heartbeat, Morning Briefing) sharing a SQLite database, orchestrated via Telegram.
 
-**Architecture:** A Listener Agent responds to Omer's Telegram messages in real time (text + voice). A Heartbeat Agent runs every 60 seconds to fire due reminders and task nudges. A Morning Briefing Agent runs at 09:00 Jerusalem time daily to send a structured digest. All agents share `D:\Nova\nova.db` as the source of truth.
+**Architecture:** A Listener Agent responds to Omer's Telegram messages in real time (text + voice). A Heartbeat Agent runs every 60 seconds to fire due reminders and task nudges. A Morning Briefing Agent runs at 09:00 Jerusalem time daily to send a structured digest. All agents share `D:\Kai\kai.db` as the source of truth.
 
 **Tech Stack:** SQLite (via `@modelcontextprotocol/server-sqlite`), Claude Code CronCreate (durable), Telegram Bot MCP, WhatsApp MCP, Google Calendar MCP (already configured), Gmail MCP (already configured), Brave Search MCP, OpenAI Whisper API.
 
-**Spec:** `D:\Nova\docs\superpowers\specs\2026-04-10-nova-personal-assistant-design.md`
+**Spec:** `D:\Kai\docs\superpowers\specs\2026-04-10-nova-personal-assistant-design.md`
 
 ---
 
-## Task 1: Database — schema.sql, seed.sql, and nova.db
+## Task 1: Database — schema.sql, seed.sql, and kai.db
 
 **Files:**
-- Create: `D:\Nova\schema.sql`
-- Create: `D:\Nova\seed.sql`
-- Creates at runtime: `D:\Nova\nova.db`
+- Create: `D:\Kai\schema.sql`
+- Create: `D:\Kai\seed.sql`
+- Creates at runtime: `D:\Kai\kai.db`
 
 - [ ] **Step 1: Write schema.sql**
 
-Create `D:\Nova\schema.sql` with this exact content:
+Create `D:\Kai\schema.sql` with this exact content:
 
 ```sql
 -- Lookup tables
@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS action_log (
 
 - [ ] **Step 2: Write seed.sql**
 
-Create `D:\Nova\seed.sql`:
+Create `D:\Kai\seed.sql`:
 
 ```sql
 INSERT OR IGNORE INTO relationship_types (name) VALUES
@@ -144,12 +144,12 @@ INSERT OR IGNORE INTO note_categories (name) VALUES
     ('other');
 ```
 
-- [ ] **Step 3: Initialize nova.db**
+- [ ] **Step 3: Initialize kai.db**
 
 ```bash
-cd D:/Nova
-sqlite3 nova.db < schema.sql
-sqlite3 nova.db < seed.sql
+cd D:/Kai
+sqlite3 kai.db < schema.sql
+sqlite3 kai.db < seed.sql
 ```
 
 Expected: no output, no errors.
@@ -157,7 +157,7 @@ Expected: no output, no errors.
 - [ ] **Step 4: Verify schema and seed**
 
 ```bash
-sqlite3 nova.db "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
+sqlite3 kai.db "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;"
 ```
 
 Expected output (exactly these 10 tables):
@@ -175,7 +175,7 @@ tasks
 ```
 
 ```bash
-sqlite3 nova.db "SELECT name FROM relationship_types; SELECT name FROM domains; SELECT name FROM note_categories;"
+sqlite3 kai.db "SELECT name FROM relationship_types; SELECT name FROM domains; SELECT name FROM note_categories;"
 ```
 
 Expected: all seeded values listed.
@@ -183,7 +183,7 @@ Expected: all seeded values listed.
 - [ ] **Step 5: Insert test row and verify FK enforcement**
 
 ```bash
-sqlite3 nova.db "
+sqlite3 kai.db "
 PRAGMA foreign_keys = ON;
 INSERT INTO people (name, relationship_id) VALUES ('Test Person', 1);
 SELECT id, name FROM people;
@@ -196,9 +196,9 @@ Expected: row inserted, then deleted cleanly.
 - [ ] **Step 6: Commit**
 
 ```bash
-cd D:/Nova
+cd D:/Kai
 git add schema.sql seed.sql
-git commit -m "feat: add SQLite schema and seed data for Nova"
+git commit -m "feat: add SQLite schema and seed data for Kai"
 ```
 
 ---
@@ -206,7 +206,7 @@ git commit -m "feat: add SQLite schema and seed data for Nova"
 ## Task 2: MCP Server Installation & Configuration
 
 **Files:**
-- Create: `D:\Nova\.claude\settings.json`
+- Create: `D:\Kai\.claude\settings.json`
 
 **Note:** Google Calendar and Gmail MCPs are already configured via the Claude.ai integration. Steps below cover the remaining MCPs.
 
@@ -233,7 +233,7 @@ Get a free API key at https://api.search.brave.com — copy the key, you'll need
 - [ ] **Step 3: Set up Telegram Bot**
 
 1. Open Telegram and message `@BotFather`
-2. Send `/newbot` — follow prompts, name it "Nova"
+2. Send `/newbot` — follow prompts, name it "Kai"
 3. Copy the bot token (format: `123456789:ABCdef...`)
 4. Install the Telegram MCP:
 
@@ -249,8 +249,8 @@ npm install -g @modelcontextprotocol/server-telegram
 - [ ] **Step 4: Set up WhatsApp MCP**
 
 ```bash
-git clone https://github.com/lharries/whatsapp-mcp.git D:/Nova/whatsapp-mcp
-cd D:/Nova/whatsapp-mcp
+git clone https://github.com/lharries/whatsapp-mcp.git D:/Kai/whatsapp-mcp
+cd D:/Kai/whatsapp-mcp
 pip install -r requirements.txt
 ```
 
@@ -261,7 +261,7 @@ python main.py
 
 - [ ] **Step 5: Write .claude/settings.json**
 
-Create `D:\Nova\.claude\settings.json` — replace all `<PLACEHOLDER>` values with your real keys:
+Create `D:\Kai\.claude\settings.json` — replace all `<PLACEHOLDER>` values with your real keys:
 
 ```json
 {
@@ -271,7 +271,7 @@ Create `D:\Nova\.claude\settings.json` — replace all `<PLACEHOLDER>` values wi
       "args": [
         "-y",
         "@modelcontextprotocol/server-sqlite",
-        "D:/Nova/nova.db"
+        "D:/Kai/kai.db"
       ]
     },
     "brave-search": {
@@ -291,7 +291,7 @@ Create `D:\Nova\.claude\settings.json` — replace all `<PLACEHOLDER>` values wi
     },
     "whatsapp": {
       "command": "python",
-      "args": ["D:/Nova/whatsapp-mcp/main.py"]
+      "args": ["D:/Kai/whatsapp-mcp/main.py"]
     }
   }
 }
@@ -303,7 +303,7 @@ The `chat.id` field in the response is your chat ID.
 
 - [ ] **Step 6: Verify MCP connectivity**
 
-Restart Claude Code in `D:\Nova\`. Then in the Claude Code session, run a quick connectivity check for each MCP:
+Restart Claude Code in `D:\Kai\`. Then in the Claude Code session, run a quick connectivity check for each MCP:
 
 SQLite:
 ```
@@ -319,16 +319,16 @@ Expected: search results returned.
 
 Telegram:
 ```
-Use the telegram MCP to send me a test message: "Nova is online"
+Use the telegram MCP to send me a test message: "Kai is online"
 ```
 Expected: message arrives in Telegram.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-cd D:/Nova
+cd D:/Kai
 git add .claude/settings.json
-git commit -m "feat: configure MCP servers for Nova"
+git commit -m "feat: configure MCP servers for Kai"
 ```
 
 ---
@@ -336,24 +336,24 @@ git commit -m "feat: configure MCP servers for Nova"
 ## Task 3: Listener Agent System Prompt
 
 **Files:**
-- Create: `D:\Nova\agents\listener.md`
+- Create: `D:\Kai\agents\listener.md`
 
 - [ ] **Step 1: Write agents/listener.md**
 
-Create `D:\Nova\agents\listener.md` with this exact content:
+Create `D:\Kai\agents\listener.md` with this exact content:
 
 ```markdown
-# Nova — Listener Agent
+# Kai — Listener Agent
 
-You are Nova, Omer's personal AI assistant. You are responding to a message Omer sent via Telegram (text or voice). Be concise, warm, and always confirm the action taken.
+You are Kai, Omer's personal AI assistant. You are responding to a message Omer sent via Telegram (text or voice). Be concise, warm, and always confirm the action taken.
 
 ## Identity
-- Omer's timezone: Jerusalem (UTC+2 standard, UTC+3 during DST — check `C:\Users\Omer\.claude\projects\D--Nova\memory\` for current offset)
-- Database: `D:\Nova\nova.db` (SQLite)
+- Omer's timezone: Jerusalem (UTC+2 standard, UTC+3 during DST — check `C:\Users\Omer\.claude\projects\D--Kai\memory\` for current offset)
+- Database: `D:\Kai\kai.db` (SQLite)
 - All datetime values stored in UTC
 
 ## Available Tools
-- `sqlite` MCP — read/write nova.db
+- `sqlite` MCP — read/write kai.db
 - `telegram` MCP — send replies to Omer
 - `whatsapp` MCP — send and receive WhatsApp messages
 - `google-calendar` MCP — read/create/update Google Calendar events
@@ -364,7 +364,7 @@ You are Nova, Omer's personal AI assistant. You are responding to a message Omer
 If the incoming message contains a voice file path:
 1. Run transcription:
    ```bash
-   whisper "<voice_file_path>" --language he --output_format txt --output_dir D:/Nova/tmp/
+   whisper "<voice_file_path>" --language he --output_format txt --output_dir D:/Kai/tmp/
    ```
 2. Read the output .txt file for the transcribed text
 3. Proceed with the transcribed text as if it were typed
@@ -464,7 +464,7 @@ Use `google-calendar` MCP directly.
 If you cannot determine intent with confidence after reading the full message, ask exactly ONE clarifying question. Example: "Did you mean to create a task or a reminder for that?"
 
 ## Self-Updating Memory
-When Omer mentions facts about himself (employer, hobby, goal, preference), immediately update the relevant memory file at `C:\Users\Omer\.claude\projects\D--Nova\memory\`. Use type `user` for personal facts, `project` for ongoing initiatives.
+When Omer mentions facts about himself (employer, hobby, goal, preference), immediately update the relevant memory file at `C:\Users\Omer\.claude\projects\D--Kai\memory\`. Use type `user` for personal facts, `project` for ongoing initiatives.
 
 Example: Omer says "I work at <employer>" → update or create `user_profile.md` with employer.
 
@@ -484,10 +484,10 @@ VALUES ('listener', '<action_type>', '<brief description>');
 
 - [ ] **Step 2: Manual smoke test — create a task**
 
-In your Claude Code session (with D:\Nova as the working directory), paste:
+In your Claude Code session (with D:\Kai as the working directory), paste:
 
 ```
-Read D:\Nova\agents\listener.md for your instructions.
+Read D:\Kai\agents\listener.md for your instructions.
 
 New Telegram message from Omer: "I need to prepare the monthly report for work until next Monday morning"
 ```
@@ -499,13 +499,13 @@ Expected behavior:
 
 Verify:
 ```bash
-sqlite3 D:/Nova/nova.db "SELECT title, priority, domain_id, due_at FROM tasks ORDER BY created_at DESC LIMIT 1;"
+sqlite3 D:/Kai/kai.db "SELECT title, priority, domain_id, due_at FROM tasks ORDER BY created_at DESC LIMIT 1;"
 ```
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd D:/Nova
+cd D:/Kai
 git add agents/listener.md
 git commit -m "feat: add Listener Agent system prompt"
 ```
@@ -515,19 +515,19 @@ git commit -m "feat: add Listener Agent system prompt"
 ## Task 4: Heartbeat Agent System Prompt
 
 **Files:**
-- Create: `D:\Nova\agents\heartbeat.md`
+- Create: `D:\Kai\agents\heartbeat.md`
 
 - [ ] **Step 1: Write agents/heartbeat.md**
 
-Create `D:\Nova\agents\heartbeat.md`:
+Create `D:\Kai\agents\heartbeat.md`:
 
 ```markdown
-# Nova — Heartbeat Agent
+# Kai — Heartbeat Agent
 
 You run every 60 seconds. You are fast and silent. Only send a Telegram message if something requires Omer's attention. Complete all steps in under 30 seconds.
 
 ## Database
-`D:\Nova\nova.db` (SQLite via `sqlite` MCP)
+`D:\Kai\kai.db` (SQLite via `sqlite` MCP)
 
 ## Step 1 — Check due reminders
 
@@ -627,7 +627,7 @@ VALUES ('heartbeat', 'run', datetime('now'));
 
 Insert a test reminder that fires immediately:
 ```bash
-sqlite3 D:/Nova/nova.db "
+sqlite3 D:/Kai/kai.db "
 INSERT INTO reminders (message, trigger_at, recurrence, status)
 VALUES ('TEST: Heartbeat is working', datetime('now', '-1 minute'), NULL, 'pending');
 "
@@ -635,7 +635,7 @@ VALUES ('TEST: Heartbeat is working', datetime('now', '-1 minute'), NULL, 'pendi
 
 In Claude Code session, run:
 ```
-Read D:\Nova\agents\heartbeat.md for your instructions and execute the heartbeat check now.
+Read D:\Kai\agents\heartbeat.md for your instructions and execute the heartbeat check now.
 ```
 
 Expected:
@@ -644,14 +644,14 @@ Expected:
 
 Verify:
 ```bash
-sqlite3 D:/Nova/nova.db "SELECT status FROM reminders WHERE message LIKE 'TEST%';"
+sqlite3 D:/Kai/kai.db "SELECT status FROM reminders WHERE message LIKE 'TEST%';"
 ```
 Expected: `fired`
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd D:/Nova
+cd D:/Kai
 git add agents/heartbeat.md
 git commit -m "feat: add Heartbeat Agent system prompt"
 ```
@@ -661,19 +661,19 @@ git commit -m "feat: add Heartbeat Agent system prompt"
 ## Task 5: Morning Briefing Agent System Prompt
 
 **Files:**
-- Create: `D:\Nova\agents\morning_briefing.md`
+- Create: `D:\Kai\agents\morning_briefing.md`
 
 - [ ] **Step 1: Write agents/morning_briefing.md**
 
-Create `D:\Nova\agents\morning_briefing.md`:
+Create `D:\Kai\agents\morning_briefing.md`:
 
 ```markdown
-# Nova — Morning Briefing Agent
+# Kai — Morning Briefing Agent
 
 You run once daily at 09:00 Jerusalem time. Send Omer one structured Telegram message covering his entire day. Jerusalem is UTC+2 (UTC+3 during DST).
 
 ## Database
-`D:\Nova\nova.db` (SQLite via `sqlite` MCP)
+`D:\Kai\kai.db` (SQLite via `sqlite` MCP)
 
 ## Step 1 — Tasks due today
 
@@ -804,7 +804,7 @@ VALUES ('morning_briefing', 'briefing_sent', date('now'));
 
 Insert test data:
 ```bash
-sqlite3 D:/Nova/nova.db "
+sqlite3 D:/Kai/kai.db "
 INSERT INTO tasks (title, priority, due_at, status)
 VALUES ('TEST: Morning briefing task', 10, datetime('now', '+2 days'), 'open');
 INSERT INTO people (name, birthday, remind_birthday_days)
@@ -814,7 +814,7 @@ VALUES ('Test Friend', strftime('%Y', 'now') || strftime('-%m-%d', 'now', '+1 da
 
 Run in Claude Code session:
 ```
-Read D:\Nova\agents\morning_briefing.md for your instructions and send the morning briefing now.
+Read D:\Kai\agents\morning_briefing.md for your instructions and send the morning briefing now.
 ```
 
 Expected:
@@ -824,7 +824,7 @@ Expected:
 
 Clean up test data:
 ```bash
-sqlite3 D:/Nova/nova.db "
+sqlite3 D:/Kai/kai.db "
 DELETE FROM tasks WHERE title LIKE 'TEST%';
 DELETE FROM people WHERE name = 'Test Friend';
 "
@@ -833,7 +833,7 @@ DELETE FROM people WHERE name = 'Test Friend';
 - [ ] **Step 3: Commit**
 
 ```bash
-cd D:/Nova
+cd D:/Kai
 git add agents/morning_briefing.md
 git commit -m "feat: add Morning Briefing Agent system prompt"
 ```
@@ -843,7 +843,7 @@ git commit -m "feat: add Morning Briefing Agent system prompt"
 ## Task 6: Register Durable Cron Jobs
 
 **Files:**
-- Auto-created by Claude Code: `D:\Nova\.claude\scheduled_tasks.json`
+- Auto-created by Claude Code: `D:\Kai\.claude\scheduled_tasks.json`
 
 **Important:** Cron jobs registered with `durable: true` persist to `.claude/scheduled_tasks.json` and survive Claude Code restarts. They auto-expire after **7 days** — you must re-register them weekly. Consider adding a weekly reminder to yourself.
 
@@ -852,14 +852,14 @@ git commit -m "feat: add Morning Briefing Agent system prompt"
 In Claude Code session, call `CronCreate` with:
 ```
 cron: "* * * * *"
-prompt: "Read D:\\Nova\\agents\\heartbeat.md for your instructions and execute the heartbeat check now."
+prompt: "Read D:\\Kai\\agents\\heartbeat.md for your instructions and execute the heartbeat check now."
 recurring: true
 durable: true
 ```
 
 Note the returned job ID — save it in a file:
 ```bash
-echo "heartbeat_cron_id=<JOB_ID>" >> D:/Nova/.nova_cron_ids
+echo "heartbeat_cron_id=<JOB_ID>" >> D:/Kai/.kai_cron_ids
 ```
 
 - [ ] **Step 2: Register Morning Briefing cron**
@@ -878,14 +878,14 @@ tzutil /s "Israel Standard Time"
 Then register in Claude Code session, call `CronCreate` with:
 ```
 cron: "0 9 * * *"
-prompt: "Read D:\\Nova\\agents\\morning_briefing.md for your instructions and send the morning briefing now."
+prompt: "Read D:\\Kai\\agents\\morning_briefing.md for your instructions and send the morning briefing now."
 recurring: true
 durable: true
 ```
 
 Note the returned job ID:
 ```bash
-echo "morning_briefing_cron_id=<JOB_ID>" >> D:/Nova/.nova_cron_ids
+echo "morning_briefing_cron_id=<JOB_ID>" >> D:/Kai/.kai_cron_ids
 ```
 
 - [ ] **Step 3: Verify cron jobs are registered**
@@ -901,7 +901,7 @@ Expected: both jobs listed — heartbeat (`* * * * *`) and morning briefing (`0 
 
 Wait 2 minutes with the Claude Code session idle. Insert a test reminder:
 ```bash
-sqlite3 D:/Nova/nova.db "
+sqlite3 D:/Kai/kai.db "
 INSERT INTO reminders (message, trigger_at, status)
 VALUES ('CRON TEST: Heartbeat is alive', datetime('now', '+30 seconds'), 'pending');
 "
@@ -911,15 +911,15 @@ Within 90 seconds, verify:
 - Telegram notification received: "⏰ CRON TEST: Heartbeat is alive"
 - Status updated:
 ```bash
-sqlite3 D:/Nova/nova.db "SELECT status FROM reminders WHERE message LIKE 'CRON TEST%';"
+sqlite3 D:/Kai/kai.db "SELECT status FROM reminders WHERE message LIKE 'CRON TEST%';"
 ```
 Expected: `fired`
 
 - [ ] **Step 5: Commit**
 
 ```bash
-cd D:/Nova
-git add .nova_cron_ids
+cd D:/Kai
+git add .kai_cron_ids
 git add .claude/scheduled_tasks.json 2>/dev/null || true
 git commit -m "feat: register durable cron jobs for heartbeat and morning briefing"
 ```
@@ -934,33 +934,33 @@ Full integration test: Listener → DB → Heartbeat → Telegram.
 
 Send to Claude Code session (simulating a Telegram message):
 ```
-Read D:\Nova\agents\listener.md for your instructions.
+Read D:\Kai\agents\listener.md for your instructions.
 New Telegram message from Omer: "I need to call the dentist to schedule an appointment, this week if possible"
 ```
 
 Verify task created:
 ```bash
-sqlite3 D:/Nova/nova.db "SELECT title, priority, domain_id, status FROM tasks ORDER BY created_at DESC LIMIT 1;"
+sqlite3 D:/Kai/kai.db "SELECT title, priority, domain_id, status FROM tasks ORDER BY created_at DESC LIMIT 1;"
 ```
 Expected: a task about calling/dentist, status=open.
 
 - [ ] **Step 2: Test Listener — add a person**
 
 ```
-Read D:\Nova\agents\listener.md for your instructions.
+Read D:\Kai\agents\listener.md for your instructions.
 New Telegram message from Omer: "Add my friend Alex to contacts. His WhatsApp is <phone>. His birthday is July 15th."
 ```
 
 Verify:
 ```bash
-sqlite3 D:/Nova/nova.db "SELECT name, phone, birthday FROM people WHERE name LIKE '%Alex%';"
+sqlite3 D:/Kai/kai.db "SELECT name, phone, birthday FROM people WHERE name LIKE '%Alex%';"
 ```
 Expected: David, <phone>, birthday populated.
 
 - [ ] **Step 3: Test Listener — web search**
 
 ```
-Read D:\Nova\agents\listener.md for your instructions.
+Read D:\Kai\agents\listener.md for your instructions.
 New Telegram message from Omer: "What's the best hummus place in Jerusalem?"
 ```
 
@@ -969,7 +969,7 @@ Expected: web search results summarised in a Telegram reply.
 - [ ] **Step 4: Test Heartbeat — high-priority task nudge**
 
 ```bash
-sqlite3 D:/Nova/nova.db "
+sqlite3 D:/Kai/kai.db "
 INSERT INTO tasks (title, priority, due_at, status)
 VALUES ('E2E TEST: urgent task', 9, datetime('now', '+2 hours'), 'open');
 "
@@ -977,7 +977,7 @@ VALUES ('E2E TEST: urgent task', 9, datetime('now', '+2 hours'), 'open');
 
 Run heartbeat manually:
 ```
-Read D:\Nova\agents\heartbeat.md for your instructions and execute the heartbeat check now.
+Read D:\Kai\agents\heartbeat.md for your instructions and execute the heartbeat check now.
 ```
 
 Expected:
@@ -986,7 +986,7 @@ Expected:
 
 Verify:
 ```bash
-sqlite3 D:/Nova/nova.db "
+sqlite3 D:/Kai/kai.db "
 SELECT tn.notification_type, tn.sent_at
 FROM task_notifications tn
 JOIN tasks t ON tn.task_id = t.id
@@ -996,7 +996,7 @@ WHERE t.title LIKE 'E2E TEST%';
 
 Clean up:
 ```bash
-sqlite3 D:/Nova/nova.db "
+sqlite3 D:/Kai/kai.db "
 DELETE FROM task_notifications WHERE task_id IN (SELECT id FROM tasks WHERE title LIKE 'E2E TEST%');
 DELETE FROM tasks WHERE title LIKE 'E2E TEST%';
 "
@@ -1005,9 +1005,9 @@ DELETE FROM tasks WHERE title LIKE 'E2E TEST%';
 - [ ] **Step 5: Final commit**
 
 ```bash
-cd D:/Nova
+cd D:/Kai
 git add -A
-git commit -m "feat: Nova personal assistant — fully operational"
+git commit -m "feat: Kai personal assistant — fully operational"
 ```
 
 ---
