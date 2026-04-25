@@ -20,20 +20,24 @@ def make_db(tmp_path):
             direction TEXT NOT NULL,
             text TEXT,
             reactions TEXT,
-            ts DATETIME DEFAULT CURRENT_TIMESTAMP
+            ts DATETIME DEFAULT CURRENT_TIMESTAMP,
+            reminder_id INTEGER REFERENCES reminders(id),
+            task_id INTEGER REFERENCES tasks(id)
         );
         CREATE TABLE reminders (
             id INTEGER PRIMARY KEY,
             message TEXT NOT NULL,
             trigger_at DATETIME NOT NULL,
             recurrence TEXT,
-            status TEXT DEFAULT 'pending'
+            status TEXT DEFAULT 'pending',
+            notification_message_id INTEGER REFERENCES messages(id)
         );
         CREATE TABLE tasks (
             id INTEGER PRIMARY KEY,
             title TEXT NOT NULL,
             priority INTEGER DEFAULT 5,
-            status TEXT DEFAULT 'open'
+            status TEXT DEFAULT 'open',
+            notification_message_id INTEGER REFERENCES messages(id)
         );
         CREATE TABLE action_log (
             id INTEGER PRIMARY KEY,
@@ -139,9 +143,9 @@ def test_unreact_on_reminder_reverts_to_pending(tmp_path):
     handle_reaction.handle_remove(message_id=12, reaction='👍', chat_id='123')
 
     conn = sqlite3.connect(db)
-    status = conn.execute("SELECT status FROM reminders WHERE message = 'לשלוח הודעה לרופא'").fetchone()[0]
+    row = conn.execute("SELECT status, trigger_at FROM reminders WHERE message = 'לשלוח הודעה לרופא'").fetchone()
     conn.close()
-    assert status == 'pending'  # reverts to pending so heartbeat can re-fire it
+    assert row[0] == 'pending'  # un-react re-starts nag cycle immediately
 
 
 def test_reaction_on_task_nudge_marks_done(tmp_path):
@@ -232,3 +236,84 @@ def test_reaction_on_unrecognized_message_only_logs(tmp_path):
     reactions = conn.execute("SELECT reactions FROM messages WHERE telegram_message_id = 30").fetchone()[0]
     conn.close()
     assert json.loads(reactions) == ['❤️']  # logged, no error
+
+
+def test_fk_lookup_dismisses_reminder(tmp_path):
+    """FK-based lookup: reaction on a message with reminder_id set dismisses the reminder."""
+    db = make_db(tmp_path)
+    conn = sqlite3.connect(db)
+    # Insert reminder first to get its id
+    conn.execute(
+        "INSERT INTO reminders (id, message, trigger_at, recurrence, status) "
+        "VALUES (10, 'לשתות מים', '2026-04-11 09:00:00', NULL, 'fired')"
+    )
+    # Insert the notification message linked via reminder_id
+    conn.execute(
+        "INSERT INTO messages (telegram_message_id, direction, text, reminder_id) "
+        "VALUES (55, 'outgoing', '⏰ לשתות מים', 10)"
+    )
+    conn.commit()
+    conn.close()
+
+    import handle_reaction
+    handle_reaction.DB_PATH = db
+    handle_reaction.handle_add(message_id=55, reaction='✅', chat_id='123')
+
+    conn = sqlite3.connect(db)
+    status = conn.execute("SELECT status FROM reminders WHERE message = 'לשתות מים'").fetchone()[0]
+    conn.close()
+    assert status == 'dismissed'
+
+
+def test_fk_lookup_marks_task_done(tmp_path):
+    """FK-based lookup: reaction on a message with task_id set marks task done."""
+    db = make_db(tmp_path)
+    conn = sqlite3.connect(db)
+    # Insert task first to get its id
+    conn.execute(
+        "INSERT INTO tasks (id, title, priority, status) "
+        "VALUES (20, 'לסיים דוח', 8, 'open')"
+    )
+    # Insert the notification message linked via task_id
+    conn.execute(
+        "INSERT INTO messages (telegram_message_id, direction, text, task_id) "
+        "VALUES (66, 'outgoing', '📋 [P8] לסיים דוח — due in ~3h', 20)"
+    )
+    conn.commit()
+    conn.close()
+
+    import handle_reaction
+    handle_reaction.DB_PATH = db
+    handle_reaction.handle_add(message_id=66, reaction='✅', chat_id='123')
+
+    conn = sqlite3.connect(db)
+    status = conn.execute("SELECT status FROM tasks WHERE title = 'לסיים דוח'").fetchone()[0]
+    conn.close()
+    assert status == 'done'
+
+
+def test_fk_lookup_recurring_reminder_not_dismissed(tmp_path):
+    """FK-based lookup: recurring reminder linked via FK is never dismissed."""
+    db = make_db(tmp_path)
+    conn = sqlite3.connect(db)
+    # Insert recurring reminder first
+    conn.execute(
+        "INSERT INTO reminders (id, message, trigger_at, recurrence, status) "
+        "VALUES (30, 'לשתות מים', '2026-04-11 09:00:00', 'daily', 'pending')"
+    )
+    # Insert the notification message linked via reminder_id
+    conn.execute(
+        "INSERT INTO messages (telegram_message_id, direction, text, reminder_id) "
+        "VALUES (77, 'outgoing', '⏰ לשתות מים', 30)"
+    )
+    conn.commit()
+    conn.close()
+
+    import handle_reaction
+    handle_reaction.DB_PATH = db
+    handle_reaction.handle_add(message_id=77, reaction='✅', chat_id='123')
+
+    conn = sqlite3.connect(db)
+    status = conn.execute("SELECT status FROM reminders WHERE message = 'לשתות מים'").fetchone()[0]
+    conn.close()
+    assert status == 'pending'  # recurring — unchanged

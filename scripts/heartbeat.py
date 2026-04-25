@@ -12,8 +12,8 @@ import json
 from datetime import datetime, timezone, timedelta
 
 DB_PATH = r"D:\Kai\kai.db"
-BOT_TOKEN = __import__("os").environ["KAI_TELEGRAM_BOT_TOKEN"]
-CHAT_ID = __import__("os").environ.get("KAI_TELEGRAM_CHAT_ID", "")
+BOT_TOKEN = os.environ["KAI_TELEGRAM_BOT_TOKEN"]
+CHAT_ID = os.environ.get("KAI_TELEGRAM_CHAT_ID", "")
 JERUSALEM_TZ = timezone(timedelta(hours=3))  # UTC+3 (Israel DST)
 
 
@@ -58,10 +58,20 @@ def run_heartbeat():
         )
         for rid, message, recurrence in cur.fetchall():
             try:
-                send_telegram(f"⏰ {message}", conn=conn)
+                tg_msg_id = send_telegram(f"⏰ {message}", conn=conn)
+                if tg_msg_id:
+                    conn.execute(
+                        "UPDATE messages SET reminder_id = ? WHERE telegram_message_id = ?",
+                        (rid, tg_msg_id)
+                    )
                 sent.append(f"reminder:{rid}")
                 if recurrence is None:
-                    cur.execute("UPDATE reminders SET status = 'fired' WHERE id = ?", (rid,))
+                    # Re-nag: reset to pending in 5 minutes from original trigger_at (not 'now')
+                    # Using trigger_at as base avoids sub-second drift turning 5min into 6min
+                    cur.execute(
+                        "UPDATE reminders SET status = 'pending', trigger_at = datetime(trigger_at, '+5 minutes') WHERE id = ?",
+                        (rid,)
+                    )
                 elif recurrence == 'daily':
                     cur.execute("UPDATE reminders SET trigger_at = datetime(trigger_at, '+1 day') WHERE id = ?", (rid,))
                 elif recurrence == 'weekly':
@@ -101,7 +111,12 @@ def run_heartbeat():
                 )
                 if cur.fetchone():
                     try:
-                        send_telegram(f"📋 [P{priority}] {title} — due in ~{hours_before}h", conn=conn)
+                        tg_msg_id = send_telegram(f"📋 [P{priority}] {title} — due in ~{hours_before}h", conn=conn)
+                        if tg_msg_id:
+                            conn.execute(
+                                "UPDATE messages SET task_id = ? WHERE telegram_message_id = ?",
+                                (tid, tg_msg_id)
+                            )
                         sent.append(f"task_nudge:{tid}:{notif_type}")
                         cur.execute(
                             "INSERT INTO task_notifications (task_id, notification_type) VALUES (?, ?)",
@@ -123,7 +138,12 @@ def run_heartbeat():
             )
             if not cur.fetchone():
                 try:
-                    send_telegram(f"⚠️ OVERDUE [P{priority}]: {title}", conn=conn)
+                    tg_msg_id = send_telegram(f"⚠️ OVERDUE [P{priority}]: {title}", conn=conn)
+                    if tg_msg_id:
+                        conn.execute(
+                            "UPDATE messages SET task_id = ? WHERE telegram_message_id = ?",
+                            (tid, tg_msg_id)
+                        )
                     sent.append(f"overdue:{tid}")
                     cur.execute(
                         "INSERT INTO task_notifications (task_id, notification_type) VALUES (?, ?)",
@@ -132,6 +152,66 @@ def run_heartbeat():
                     conn.commit()
                 except Exception as e:
                     errors.append(f"overdue:{tid}:{e}")
+
+        # Step 5: JSONL context size warning — alert before auto-compact hits
+        try:
+            import os, glob as glob_mod
+            jsonl_dir = r"C:/Users/Omer/.claude/projects/D--Kai"
+            jsonl_files = [f for f in glob_mod.glob(os.path.join(jsonl_dir, "*.jsonl"))]
+            if jsonl_files:
+                current_jsonl = max(jsonl_files, key=os.path.getmtime)
+                file_size = os.path.getsize(current_jsonl)
+
+                # Read last 3MB to find the most recent compact_boundary marker
+                WINDOW = 3 * 1024 * 1024
+                read_size = min(WINDOW, file_size)
+                with open(current_jsonl, 'rb') as f:
+                    f.seek(file_size - read_size)
+                    tail = f.read()
+
+                last_boundary = tail.rfind(b'compact_boundary')
+                if last_boundary >= 0:
+                    line_end = tail.find(b'\n', last_boundary)
+                    if line_end < 0:
+                        line_end = len(tail)
+                    bytes_since = len(tail) - line_end
+                    # Absolute byte position of this compact_boundary in the file
+                    boundary_abs_pos = (file_size - read_size) + last_boundary
+                else:
+                    # No boundary found → entire window counts as "since compact"
+                    bytes_since = read_size
+                    boundary_abs_pos = -1  # fresh session, no compact yet
+
+                MB = bytes_since / (1024 * 1024)
+
+                level = None
+                if MB >= 1.1:
+                    level = 'critical'
+                elif MB >= 0.9:
+                    level = 'warning'
+
+                if level:
+                    # De-dup: one alert per compact cycle (identified by boundary byte position)
+                    cur.execute("""
+                        SELECT id FROM action_log
+                        WHERE agent = 'heartbeat' AND action = 'context_size_alert'
+                        AND details LIKE ?
+                        LIMIT 1
+                    """, (f"boundary_pos:{boundary_abs_pos}%",))
+                    if not cur.fetchone():
+                        emoji = '🔴' if level == 'critical' else '🟡'
+                        msg = f"{emoji} קונטקסט: {MB:.2f}MB מאז ה-compact האחרון"
+                        if level == 'critical':
+                            msg += " — compact עלול לקרות בקרוב!"
+                        send_telegram(msg, conn=conn)
+                        sent.append(f"context_size_alert:{level}:{MB:.2f}MB")
+                        cur.execute(
+                            "INSERT INTO action_log (agent, action, details, created_at) VALUES (?, ?, ?, datetime('now'))",
+                            ("heartbeat", "context_size_alert", f"boundary_pos:{boundary_abs_pos},level:{level},mb:{MB:.2f}")
+                        )
+                        conn.commit()
+        except Exception as e:
+            errors.append(f"context_check:{e}")
 
         # Step 4: Log every run
         details = "ok"

@@ -43,7 +43,7 @@ def get_connection() -> sqlite3.Connection:
 
 def lookup_message(conn: sqlite3.Connection, message_id: int) -> sqlite3.Row:
     row = conn.execute(
-        'SELECT id, text, reactions, direction FROM messages WHERE telegram_message_id = ?',
+        'SELECT id, telegram_message_id, text, reactions, direction FROM messages WHERE telegram_message_id = ?',
         (message_id,)
     ).fetchone()
     if row is None:
@@ -70,8 +70,16 @@ def update_reactions_remove(conn: sqlite3.Connection, msg_id: int, current: Opti
 
 def log_action(conn: sqlite3.Connection, action: str, details: str) -> None:
     conn.execute(
-        "INSERT INTO action_log (agent, action, details) VALUES ('handle_reaction', ?, ?)",
+        "INSERT INTO action_log (agent, action, details) VALUES ('listener', ?, ?)",
         (action, details)
+    )
+
+
+def log_reaction(conn: sqlite3.Connection, message_id: int, emoji: str, action: str) -> None:
+    conn.execute(
+        "INSERT INTO message_reactions (telegram_message_id, direction, emoji, action, ts) "
+        "VALUES (?, 'incoming', ?, ?, datetime('now'))",
+        (message_id, emoji, action)
     )
 
 
@@ -82,6 +90,7 @@ def handle_add(message_id: int, reaction: str, chat_id: str) -> None:
         update_reactions_add(conn, msg['id'], msg['reactions'], reaction)
         _apply_add_action(conn, msg, reaction)
         log_action(conn, 'reaction_add', f'msg={message_id} emoji={reaction}')
+        log_reaction(conn, message_id, reaction, 'add')
         conn.commit()
     finally:
         conn.close()
@@ -94,13 +103,48 @@ def handle_remove(message_id: int, reaction: str, chat_id: str) -> None:
         update_reactions_remove(conn, msg['id'], msg['reactions'], reaction)
         _apply_remove_action(conn, msg, reaction)
         log_action(conn, 'reaction_remove', f'msg={message_id} emoji={reaction}')
+        log_reaction(conn, message_id, reaction, 'remove')
         conn.commit()
     finally:
         conn.close()
 
 
+def _lookup_by_fk(conn: sqlite3.Connection, telegram_message_id: int):
+    """
+    Find reminder or task directly from messages.reminder_id / messages.task_id.
+    Returns ('reminder', row) | ('task', row) | (None, None).
+    """
+    msg = conn.execute(
+        "SELECT reminder_id, task_id FROM messages WHERE telegram_message_id = ?",
+        (telegram_message_id,)
+    ).fetchone()
+    if msg is None:
+        return None, None
+
+    if msg['reminder_id']:
+        reminder = conn.execute("SELECT * FROM reminders WHERE id = ?", (msg['reminder_id'],)).fetchone()
+        if reminder:
+            return 'reminder', reminder
+
+    if msg['task_id']:
+        task = conn.execute("SELECT * FROM tasks WHERE id = ?", (msg['task_id'],)).fetchone()
+        if task:
+            return 'task', task
+
+    return None, None
+
+
 def _apply_add_action(conn: sqlite3.Connection, msg: sqlite3.Row, reaction: str) -> None:
     """Mark reminder/task as done when user reacts."""
+    # Try FK-based lookup first (fast path for messages sent after migration)
+    entity_type, entity_row = _lookup_by_fk(conn, msg['telegram_message_id'])
+    if entity_type == 'reminder':
+        _mark_reminder_by_row(conn, entity_row, 'dismissed')
+        return
+    if entity_type == 'task':
+        _mark_task_by_row(conn, entity_row, 'done')
+        return
+    # Fallback: text-prefix matching (for older messages without notification_message_id)
     text = msg['text'] or ''
     msg_type, content = _parse_message_type(text)
     if msg_type == 'reminder' and content:
@@ -111,10 +155,19 @@ def _apply_add_action(conn: sqlite3.Connection, msg: sqlite3.Row, reaction: str)
 
 def _apply_remove_action(conn: sqlite3.Connection, msg: sqlite3.Row, reaction: str) -> None:
     """Reverse reminder/task action when user removes reaction."""
+    # Try FK-based lookup first (fast path for messages sent after migration)
+    entity_type, entity_row = _lookup_by_fk(conn, msg['telegram_message_id'])
+    if entity_type == 'reminder':
+        _mark_reminder_by_row(conn, entity_row, 'fired')
+        return
+    if entity_type == 'task':
+        _mark_task_by_row(conn, entity_row, 'open')
+        return
+    # Fallback: text-prefix matching (for older messages without notification_message_id)
     text = msg['text'] or ''
     msg_type, content = _parse_message_type(text)
     if msg_type == 'reminder' and content:
-        _mark_reminder(conn, content, 'pending')
+        _mark_reminder(conn, content, 'fired')
     elif msg_type == 'task' and content:
         _mark_task(conn, content, 'open')
 
@@ -136,6 +189,38 @@ def _parse_message_type(text: str):
     return 'unknown', None
 
 
+def _mark_reminder_by_row(conn: sqlite3.Connection, row: sqlite3.Row, new_status: str) -> None:
+    """Mark a reminder directly by its DB row. Skips recurring reminders on 'dismissed'."""
+    if row['recurrence'] is not None:
+        return
+    if new_status == 'fired':
+        # Un-react: re-start the nag cycle immediately
+        conn.execute(
+            "UPDATE reminders SET status = 'pending', trigger_at = datetime('now') WHERE id = ?",
+            (row['id'],)
+        )
+    else:
+        conn.execute('UPDATE reminders SET status = ? WHERE id = ?', (new_status, row['id']))
+
+
+def _mark_task_by_row(conn: sqlite3.Connection, row: sqlite3.Row, new_status: str) -> None:
+    """Mark a task directly by its DB row.
+    Only transitions: open→done (add reaction) or done→open (remove reaction).
+    Does not touch cancelled tasks.
+    """
+    expected_current = 'open' if new_status == 'done' else 'done'
+    if new_status == 'done':
+        conn.execute(
+            "UPDATE tasks SET status = ?, completed_at = datetime('now') WHERE id = ? AND status = ?",
+            (new_status, row['id'], expected_current)
+        )
+    else:
+        conn.execute(
+            'UPDATE tasks SET status = ?, completed_at = NULL WHERE id = ? AND status = ?',
+            (new_status, row['id'], expected_current)
+        )
+
+
 def _mark_reminder(conn: sqlite3.Connection, message_text: str, new_status: str) -> None:
     """Mark one-shot reminder with matching message text; skip recurring ones on 'dismissed'."""
     row = conn.execute(
@@ -144,10 +229,17 @@ def _mark_reminder(conn: sqlite3.Connection, message_text: str, new_status: str)
     ).fetchone()
     if row is None:
         return
-    # For 'dismissed': only apply to one-shot reminders (recurrence IS NULL)
-    if new_status == 'dismissed' and row['recurrence'] is not None:
+    # Only apply to one-shot reminders — recurring ones are managed entirely by the heartbeat
+    if row['recurrence'] is not None:
         return
-    conn.execute('UPDATE reminders SET status = ? WHERE id = ?', (new_status, row['id']))
+    if new_status == 'fired':
+        # Un-react: re-start the nag cycle immediately
+        conn.execute(
+            "UPDATE reminders SET status = 'pending', trigger_at = datetime('now') WHERE id = ?",
+            (row['id'],)
+        )
+    else:
+        conn.execute('UPDATE reminders SET status = ? WHERE id = ?', (new_status, row['id']))
 
 
 def _mark_task(conn: sqlite3.Connection, title: str, new_status: str) -> None:
@@ -156,10 +248,16 @@ def _mark_task(conn: sqlite3.Connection, title: str, new_status: str) -> None:
     Does not touch cancelled tasks.
     """
     expected_current = 'open' if new_status == 'done' else 'done'
-    conn.execute(
-        'UPDATE tasks SET status = ? WHERE title = ? AND status = ?',
-        (new_status, title, expected_current)
-    )
+    if new_status == 'done':
+        conn.execute(
+            "UPDATE tasks SET status = ?, completed_at = datetime('now') WHERE title = ? AND status = ?",
+            (new_status, title, expected_current)
+        )
+    else:
+        conn.execute(
+            'UPDATE tasks SET status = ?, completed_at = NULL WHERE title = ? AND status = ?',
+            (new_status, title, expected_current)
+        )
 
 
 def main():

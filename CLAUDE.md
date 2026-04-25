@@ -8,7 +8,8 @@ Kai (קאי) is Omer's personal AI assistant system. It runs autonomously via Cl
 |-------|---------|------|
 | `agents/listener.md` | On incoming Telegram message | **Dispatcher** — parses intent, spawns a background worker agent, sends acknowledgment, stops |
 | Worker agent (spawned inline) | Spawned by dispatcher | **Executor** — does all actual work, sends Telegram updates at every step |
-| `agents/morning_briefing.md` | Daily 09:00 Jerusalem time | Compile & send daily briefing |
+| `agents/morning_briefing_launcher.md` | Daily 09:00 Jerusalem time (cron) | Spawns background Agent to compile & send daily briefing |
+| `agents/morning_briefing.md` | Spawned by launcher | Actual briefing logic: DB, weather, calendar, email, Telegram send |
 
 > **Note:** `agents/heartbeat.md` exists but is superseded by `scripts/heartbeat.py`, which runs via Windows Task Scheduler. Ignore the agent version.
 
@@ -64,7 +65,7 @@ mcp__plugin_telegram_telegram__reply(chat_id="${KAI_TELEGRAM_CHAT_ID}", text="..
 ```
 
 ### Worker update pattern
-Workers send a new Telegram message before each major step (not edits). Each update is a real message so Omer sees a live stream of progress. Final result is the last message.
+Workers **edit ACK_MSG_ID** before each step — not new messages. ACK_MSG_ID is the dispatcher's "🔄 ... — ⏳ מייצר agent..." message. The worker's very first action is to edit it to "🔄 ... — ⚙️ agent מוכן, מתחיל...". All subsequent progress updates also edit that same message. Only the final result is sent as a new reply. This way Omer sees one live-updating status message, plus the final result.
 
 See `agents/listener.md` → Mandatory Telegram Update Protocol for the full standard.
 
@@ -93,8 +94,14 @@ See `agents/listener.md` Step 2 for the exact query.
 ## Startup
 
 1. `start_claude.bat` launches Claude Code
-2. `SessionStart` hook: patches Telegram plugin, sends "קלוד עלה ✅" to Telegram
-3. Cron jobs registered each session for heartbeat + morning briefing (IDs saved to `.kai_cron_ids`)
+2. `SessionStart` hook: patches Telegram plugin, sends "קלוד עלה ✅" to Telegram, runs `session_start_cleanup.py` (which also deletes the stale `cron_registered_sentinel` from the previous session), injects session context + startup instructions
+3. **On every session start**, the `=== STARTUP ACTIONS REQUIRED ===` block will appear in the first message's context — this is expected and will happen **every fresh session**, because Claude Code's cron store (`.claude/scheduled_tasks.json`) does not actually survive a restart even when `durable=true` is set. Call `CronCreate` for the morning briefing **after sending the first ACK** (if a message arrived simultaneously) or immediately (if no message is pending):
+   ⚠️ **ACK always takes priority over CronCreate.** CronCreate can wait 1 extra second; ACK cannot.
+   - `cron="0 9 * * *"` (local Israel time = 09:00 Jerusalem), `prompt="D:/Kai/agents/morning_briefing_launcher.md"`, `recurring=true`, `durable=true`
+   - The launcher spawns a background Agent with `morning_briefing.md` as prompt — main session stays free
+   - Save the returned ID to `D:/Kai/.kai_cron_ids` (update `morning_briefing_cron_id` line)
+   - After saving the ID, create `D:/Kai/tmp/cron_registered_sentinel` (empty file). This is a **session-scoped marker** only — it says "this running session has already registered the cron." It is deleted automatically by `session_start_cleanup.py` at the start of the next session so the block fires again on the fresh session's first message.
+4. Heartbeat runs via **Windows Task Scheduler** (`scripts/heartbeat.py`) — do NOT register it as a cron job
 
 ## When to Use Agents vs In-Session
 
@@ -112,10 +119,14 @@ Consistency in update behavior matters more than saving 2–3 seconds.
 - **Language**: Respond in Hebrew when user writes Hebrew, English when they write English
 - **Timezone**: ALWAYS convert UTC times from DB to Tel Aviv local time (UTC+3) before displaying. NEVER show raw UTC times to Omer. Example: DB value `07:44 UTC` → display as `10:44`
 - **Priority scale**: 0–4 = low, 5–9 = medium, 10–11 = critical
+- **Voice ACK exact text**: The dispatcher MUST send exactly `🎤 מתמלל... ⏳` for voice messages — copy verbatim, no emoji substitution
 - **Memory**: Update `C:\Users\Omer\.claude\projects\D--Kai\memory\` when learning new info about Omer or project state
 - **DB encoding**: Use `conn.text_factory = str` if Hebrew text appears garbled
+- **Code/file edits**: Any `Edit` or `Write` tool call made in direct response to Omer's Telegram message must be followed by a Telegram reply confirming the change: `"✅ [תיאור מה השתנה]"`. Never make silent edits. Omer watches Telegram, not the terminal.
 
 ## Common Patterns
+
+- **Typing indicator**: Always pass `ORIGINAL_MSG_ID` as the 2nd arg to `start_typing.py` / `stop_typing.py`. ORIGINAL_MSG_ID is the single typing key for an entire message lifetime — dispatcher, fast scripts, and workers all use it. Using ACK_MSG_ID instead causes orphan typing loops (see investigation #016).
 
 ### Query tasks due today (Jerusalem)
 ```python
