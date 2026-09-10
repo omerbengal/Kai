@@ -30,14 +30,25 @@ def make_db(tmp_path):
             trigger_at DATETIME NOT NULL,
             recurrence TEXT,
             status TEXT DEFAULT 'pending',
-            notification_message_id INTEGER REFERENCES messages(id)
+            notification_message_id INTEGER REFERENCES messages(id),
+            series_at DATETIME,
+            nag_count INTEGER DEFAULT 0
         );
         CREATE TABLE tasks (
             id INTEGER PRIMARY KEY,
             title TEXT NOT NULL,
             priority INTEGER DEFAULT 5,
             status TEXT DEFAULT 'open',
+            completed_at DATETIME,
             notification_message_id INTEGER REFERENCES messages(id)
+        );
+        CREATE TABLE message_reactions (
+            id INTEGER PRIMARY KEY,
+            telegram_message_id INTEGER NOT NULL,
+            direction TEXT NOT NULL,
+            emoji TEXT NOT NULL,
+            action TEXT NOT NULL,
+            ts DATETIME DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE action_log (
             id INTEGER PRIMARY KEY,
@@ -112,7 +123,7 @@ def test_reaction_on_oneshot_reminder_dismisses(tmp_path):
     assert status == 'dismissed'
 
 
-def test_reaction_on_recurring_reminder_does_not_dismiss(tmp_path):
+def test_reaction_on_recurring_reminder_rolls_to_next_occurrence(tmp_path):
     db = make_db(tmp_path)
     conn = sqlite3.connect(db)
     conn.execute("INSERT INTO messages (telegram_message_id, direction, text) VALUES (11, 'outgoing', '⏰ לשתות מים')")
@@ -125,9 +136,14 @@ def test_reaction_on_recurring_reminder_does_not_dismiss(tmp_path):
     handle_reaction.handle_add(message_id=11, reaction='✅', chat_id='123')
 
     conn = sqlite3.connect(db)
-    status = conn.execute("SELECT status FROM reminders WHERE message = 'לשתות מים'").fetchone()[0]
+    status, trigger_at, series_at, nag_count = conn.execute(
+        "SELECT status, trigger_at, series_at, nag_count FROM reminders WHERE message = 'לשתות מים'"
+    ).fetchone()
     conn.close()
-    assert status == 'pending'  # unchanged
+    # The series stays alive — acking means "handled this occurrence", not "cancel"
+    assert status == 'pending'
+    assert trigger_at > '2026-04-11 09:00:00'  # rolled forward off the acked occurrence
+    assert series_at is None and nag_count == 0  # nag state cleared
 
 
 def test_unreact_on_reminder_reverts_to_pending(tmp_path):
@@ -202,8 +218,8 @@ def test_unreact_on_task_reverts_to_open(tmp_path):
     assert status == 'open'
 
 
-def test_unreact_on_recurring_reminder_does_not_change_status(tmp_path):
-    """Removing a reaction from a recurring reminder leaves status unchanged."""
+def test_unreact_on_recurring_reminder_resumes_nagging(tmp_path):
+    """Removing a reaction from a recurring reminder re-arms it immediately."""
     db = make_db(tmp_path)
     conn = sqlite3.connect(db)
     conn.execute("INSERT INTO messages (telegram_message_id, direction, text, reactions) VALUES (13, 'outgoing', '⏰ לשתות מים', '[\"✅\"]')")
@@ -216,9 +232,14 @@ def test_unreact_on_recurring_reminder_does_not_change_status(tmp_path):
     handle_reaction.handle_remove(message_id=13, reaction='✅', chat_id='123')
 
     conn = sqlite3.connect(db)
-    status = conn.execute("SELECT status FROM reminders WHERE message = 'לשתות מים'").fetchone()[0]
+    status, due_now, series_at, nag_count = conn.execute(
+        "SELECT status, trigger_at <= datetime('now'), series_at, nag_count "
+        "FROM reminders WHERE message = 'לשתות מים'"
+    ).fetchone()
     conn.close()
-    assert status == 'pending'  # recurring reminders are never status-changed, even on remove
+    assert status == 'pending'
+    assert due_now == 1  # re-armed, so the next heartbeat nags again
+    assert series_at is None and nag_count == 0
 
 
 def test_reaction_on_unrecognized_message_only_logs(tmp_path):
@@ -292,8 +313,8 @@ def test_fk_lookup_marks_task_done(tmp_path):
     assert status == 'done'
 
 
-def test_fk_lookup_recurring_reminder_not_dismissed(tmp_path):
-    """FK-based lookup: recurring reminder linked via FK is never dismissed."""
+def test_fk_lookup_recurring_reminder_rolls_to_next_occurrence(tmp_path):
+    """FK-based lookup: acking a recurring reminder advances it instead of dismissing it."""
     db = make_db(tmp_path)
     conn = sqlite3.connect(db)
     # Insert recurring reminder first
@@ -314,6 +335,9 @@ def test_fk_lookup_recurring_reminder_not_dismissed(tmp_path):
     handle_reaction.handle_add(message_id=77, reaction='✅', chat_id='123')
 
     conn = sqlite3.connect(db)
-    status = conn.execute("SELECT status FROM reminders WHERE message = 'לשתות מים'").fetchone()[0]
+    status, trigger_at = conn.execute(
+        "SELECT status, trigger_at FROM reminders WHERE message = 'לשתות מים'"
+    ).fetchone()
     conn.close()
-    assert status == 'pending'  # recurring — unchanged
+    assert status == 'pending'  # series survives the ack
+    assert trigger_at > '2026-04-11 09:00:00'  # advanced past the acked occurrence

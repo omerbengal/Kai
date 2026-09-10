@@ -31,7 +31,16 @@ from _base import *
 WA_DB = 'D:/Kai/whatsapp-mcp/whatsapp-bridge/store/messages.db'
 WA_API = 'http://localhost:8080/api/send'
 SUFFIX = "\n[נשלח על ידי קאי 🤖]"
+SUFFIX_BARE = "[נשלח על ידי קאי 🤖]"
 FUZZY_THRESHOLD = 60
+
+
+def _ensure_signature(text):
+    if not text:
+        return text
+    if text.rstrip().endswith(SUFFIX_BARE):
+        return text
+    return text + SUFFIX
 
 
 def fuzzy_score(a, b):
@@ -147,7 +156,7 @@ def main():
 
         if args.file_path:
             # Send file (with optional caption)
-            caption = (args.message + SUFFIX) if args.message else None
+            caption = _ensure_signature(args.message) if args.message else None
             success = whatsapp_send_file(jid, args.file_path, caption=caption)
             file_name = os.path.basename(args.file_path)
             if success:
@@ -161,7 +170,7 @@ def main():
                 fail(args, f'שליחת הקובץ לקבוצה "{group_name}" נכשלה')
         else:
             # Text only (existing behavior)
-            full_message = args.message + SUFFIX
+            full_message = _ensure_signature(args.message)
             success, status = whatsapp_send_group(jid, full_message)
             if success:
                 preview = args.message[:50] + ('...' if len(args.message) > 50 else '')

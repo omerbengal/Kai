@@ -19,13 +19,9 @@ ORIGINAL_MSG_ID: {{ ORIGINAL_MSG_ID }}
 
 **Edit `ACK_MSG_ID` before every step.**
 
-**Typing indicator:** The dispatcher already started a typing loop keyed by ORIGINAL_MSG_ID (PID file: `D:/Kai/tmp/typing_pid_{ORIGINAL_MSG_ID}.txt`). **Inherit it — do NOT call start_typing.py again** (per investigation #016).
+**Typing indicator:** Not yours to manage (investigation #043). The hooks in `.claude/settings.json` own it: a 15-second lease that every tool call you make - including from a background worker - renews, and that expires on its own within ~15 seconds of your last tool call. Never call `start_typing.py` or `stop_typing.py`, and never touch `D:/Kai/tmp/typing_lease.json` or `typing_pid_*.txt`.
 
-**When sending the final report + buttons — stop typing FIRST (keyed by ORIGINAL_MSG_ID, same key the dispatcher used):**
-```bash
-python D:/Kai/scripts/stop_typing.py {{ ORIGINAL_MSG_ID }}
-```
-Then send the message with `inline_keyboard`. Do NOT restart typing after this.
+**Send the final report + buttons as the LAST tool call** - anything after it renews the lease and shows "typing…" for a few seconds after Omer already has the report.
 
 **RTL:** Prepend `\u200F` to every Telegram message line.
 
@@ -103,7 +99,7 @@ Write the file:
 ```
 
 ### Step 4 — Send report + approval buttons
-Stop typing first (see above), then send:
+Send (this must be your last tool call - see above):
 
 ```
 reply(
@@ -146,8 +142,6 @@ conn = sqlite3.connect('D:/Kai/kai.db')
 conn.execute('DELETE FROM messages WHERE telegram_message_id = ?', ({{ ACK_MSG_ID }},))
 conn.commit()
 conn.close()
-try: os.remove('D:/Kai/tmp/typing_pid_{{ ORIGINAL_MSG_ID }}.txt')
-except: pass
 "
 ```
 

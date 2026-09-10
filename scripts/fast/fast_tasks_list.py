@@ -6,9 +6,10 @@ Usage: python fast_tasks_list.py [--filter today|all|overdue|domain|priority] [-
 import sys
 sys.path.insert(0, 'D:/Kai/scripts/fast')
 from _base import *
+import local_tz  # home timezone (travel-mode aware) - scripts/local_tz.py
 from datetime import datetime, timezone, timedelta
 
-JLM = timezone(timedelta(hours=3))
+JLM = local_tz.home_tz()  # was fixed UTC+3; travel-mode aware
 
 def main():
     p = base_args("List tasks")
@@ -29,15 +30,16 @@ def main():
         now = datetime.now(JLM)
 
         if args.filter == "today":
-            start = now.replace(hour=0, minute=0, second=0).astimezone(timezone.utc).isoformat()
-            end = now.replace(hour=23, minute=59, second=59).astimezone(timezone.utc).isoformat()
+            # DB stores 'YYYY-MM-DD HH:MM:SS' (space) - compare in the same format
+            start = local_tz.utc_db_str(now.replace(hour=0, minute=0, second=0, microsecond=0))
+            end = local_tz.utc_db_str(now.replace(hour=23, minute=59, second=59, microsecond=0))
             rows = conn.execute("""
                 SELECT t.title, t.priority, d.name as domain, t.due_at
                 FROM tasks t LEFT JOIN domains d ON t.domain_id = d.id
                 WHERE t.status = 'open' AND t.due_at BETWEEN ? AND ?
                 ORDER BY t.priority DESC
             """, (start, end)).fetchall()
-            header = "📋 משימות להיום"
+            header = "📋 משימות להיום" + (f" ({local_tz.tz_label()})" if local_tz.tz_label() else "")
 
         elif args.filter == "overdue":
             rows = conn.execute("""
@@ -81,19 +83,47 @@ def main():
             finish(args, f"{RLM}{header}\n{RLM}אין משימות.")
             return
 
-        lines = [f"{RLM}{header}", ""]
-        for r in rows:
-            due = ""
-            if r["due_at"]:
-                try:
-                    dt = datetime.fromisoformat(r["due_at"]).replace(tzinfo=timezone.utc).astimezone(JLM)
-                    due = f" — {dt.strftime('%d/%m %H:%M')}"
-                except Exception:
-                    pass
-            domain_str = f" [{r['domain']}]" if r["domain"] else ""
-            lines.append(f"{RLM}• [P{r['priority']}] {r['title']}{domain_str}{due}")
+        def fmt_due(r):
+            if not r["due_at"]:
+                return ""
+            try:
+                dt = datetime.fromisoformat(r["due_at"]).replace(tzinfo=timezone.utc).astimezone(JLM)
+                return f" - {dt.strftime('%d/%m %H:%M')}"
+            except Exception:
+                return ""
 
-        finish(args, "\n".join(lines))
+        if args.filter == "all":
+            DOMAIN_META = {
+                "work":     ("💼", "עבודה"),
+                "personal": ("🏠", "אישי"),
+                "health":   ("🏥", "בריאות"),
+                "finance":  ("💰", "כספים"),
+            }
+            groups = {}
+            for r in rows:
+                dom = r["domain"] or "ללא תחום"
+                groups.setdefault(dom, []).append(r)
+
+            def dom_sort_key(d):
+                order = {"work": 0, "personal": 1}
+                return (order.get(d, 2), d)
+
+            lines = [f"{RLM}{header} ({len(rows)}):", ""]
+            for dom in sorted(groups.keys(), key=dom_sort_key):
+                emoji, label = DOMAIN_META.get(dom, ("📌", dom))
+                lines.append(f"{RLM}{emoji} {label} ({len(groups[dom])})")
+                lines.append("")
+                for r in groups[dom]:
+                    lines.append(f"{RLM}• [P{r['priority']}] {r['title']}{fmt_due(r)}")
+                    lines.append("")
+            finish(args, "\n".join(lines).rstrip())
+        else:
+            lines = [f"{RLM}{header}", ""]
+            for r in rows:
+                domain_str = f" [{r['domain']}]" if r["domain"] else ""
+                lines.append(f"{RLM}• [P{r['priority']}] {r['title']}{domain_str}{fmt_due(r)}")
+                lines.append("")
+            finish(args, "\n".join(lines).rstrip())
     except Exception as e:
         fail(args, f"שגיאה פנימית: {e}")
 

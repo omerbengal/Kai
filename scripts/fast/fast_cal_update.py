@@ -16,10 +16,11 @@ Only searches the next 30 days. If multiple events match, updates the first (soo
 import sys
 sys.path.insert(0, 'D:/Kai/scripts/fast')
 from _base import *
+import local_tz  # home timezone (travel-mode aware) - scripts/local_tz.py
 from _gcal import get_calendar_service, parse_datetime_jerusalem
 from datetime import datetime, timezone, timedelta
 
-JERUSALEM = timezone(timedelta(hours=3))
+JERUSALEM = local_tz.home_tz()  # was fixed UTC+3; travel-mode aware
 
 
 def find_event(service, keyword, calendar_id="primary"):

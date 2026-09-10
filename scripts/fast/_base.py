@@ -16,16 +16,50 @@ DB_PATH = "D:/Kai/kai.db"
 WHATSAPP_API = "http://localhost:8080"
 RLM = "\u200F"
 
+sys.path.insert(0, "D:/Kai/scripts")
+try:
+    from tg_pin import pin_ack, unpin_ack
+except Exception:  # pin support is optional — never break a fast script over it
+    def pin_ack(*a, **k):
+        pass
+    def unpin_ack(*a, **k):
+        pass
+
+try:
+    import local_tz  # travel-mode aware home timezone; never hard-code UTC+3 (scripts/local_tz.py)
+except Exception:
+    local_tz = None
+
+
+def fmt_when(utc_value, fmt="%d/%m %H:%M", force_israel=False):
+    """UTC DB value -> local display, e.g. '14/09 12:00 (תאילנד)' while abroad."""
+    try:
+        return local_tz.fmt_local(utc_value, fmt, force_israel=force_israel)
+    except Exception:
+        return str(utc_value)[:16]
+
+
 def base_args(description):
-    """Return argparse parser with standard args every script needs."""
+    """Return argparse parser with standard args every script needs.
+
+    Fast-script ACKs are never pinned (Omer, 28/09/2026): they live 3-10s, so a pin
+    only flashes the banner. delete_ack() still unpins - a no-op on a non-pinned ACK.
+    """
     p = argparse.ArgumentParser(description=description)
     p.add_argument("--ack_id", required=True, help="ACK message ID to delete on completion")
     p.add_argument("--orig_id", required=True, help="Original message ID for reply threading")
     p.add_argument("--chat_id", default=CHAT_ID)
+    p.add_argument("--voice_transcription", default=None,
+                   help="If set, prepend a voice-echo header (🎤 \"...\") to the final reply. "
+                        "Used for voice-initiated requests so the user always sees what was heard.")
     return p
 
 def tg_reply(chat_id, text, reply_to=None):
-    """Send a Telegram message."""
+    """Send a Telegram message and save it to the messages table.
+
+    Returns the telegram_message_id of the sent message, or None on failure.
+    Saving to DB is best-effort: if the save fails, the send is still considered successful.
+    """
     payload = {"chat_id": chat_id, "text": text}
     if reply_to:
         payload["reply_to_message_id"] = int(reply_to)
@@ -35,8 +69,13 @@ def tg_reply(chat_id, text, reply_to=None):
         data=data,
         headers={"Content-Type": "application/json; charset=utf-8"}
     )
+    msg_id = None
     try:
-        urllib.request.urlopen(req, timeout=10)
+        resp = urllib.request.urlopen(req, timeout=10)
+        body = resp.read()
+        result = json.loads(body.decode("utf-8"))
+        if result.get("ok"):
+            msg_id = result["result"]["message_id"]
     except Exception as e:
         # Last-resort: send plain ASCII error so Omer sees something
         err_payload = json.dumps({"chat_id": chat_id, "text": f"fast-script error: {e}"}).encode()
@@ -49,6 +88,27 @@ def tg_reply(chat_id, text, reply_to=None):
             urllib.request.urlopen(err_req, timeout=10)
         except Exception:
             pass
+        return None
+
+    # Best-effort: save outgoing message to DB so reactions, bump and history work.
+    # Same schema as save_telegram_message.py::save_message.
+    if msg_id is not None:
+        try:
+            from datetime import datetime, timezone
+            ts = datetime.now(timezone.utc).isoformat()
+            conn = sqlite3.connect(DB_PATH)
+            conn.text_factory = str
+            conn.execute(
+                "INSERT INTO messages (telegram_message_id, direction, text, reply_to_message_id, reply_to_message_text, ts) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (int(msg_id), "outgoing", text, int(reply_to) if reply_to else None, None, ts)
+            )
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass  # send already succeeded — DB save is best-effort
+
+    return msg_id
 
 def tg_delete(chat_id, msg_id):
     """Delete a Telegram message and remove from DB."""
@@ -68,25 +128,22 @@ def tg_delete(chat_id, msg_id):
         pass
 
 def start_typing(chat_id, worker_id):
-    """Start typing indicator. subprocess.run (blocking) ensures PID file is written before returning.
-    worker_id should be ORIGINAL_MSG_ID — the stable ID that exists from message arrival onward."""
-    try:
-        subprocess.run(
-            [sys.executable, "D:/Kai/scripts/start_typing.py", str(chat_id), str(worker_id)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
-        )
-    except Exception:
-        pass
+    """NO-OP since investigation #043.
+
+    The typing indicator is no longer per-message. It is owned entirely by the
+    hooks in .claude/settings.json via scripts/typing_lease.py: a 15-second
+    lease that every tool call renews and that expires on its own when work
+    stops. The old per-message typing_pid_{ORIGINAL_MSG_ID} loops were a second,
+    blind system that survived the other one's stop and left Omer looking at
+    "typing..." for up to 30 minutes.
+
+    The signature is kept so the 23 fast scripts that call it keep working.
+    """
+    return
 
 def stop_typing(worker_id):
-    """Stop typing indicator. worker_id should be the same one used in start_typing (ORIGINAL_MSG_ID)."""
-    try:
-        subprocess.run(
-            [sys.executable, "D:/Kai/scripts/stop_typing.py", str(worker_id)],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5
-        )
-    except Exception:
-        pass
+    """NO-OP since investigation #043 — see start_typing above."""
+    return
 
 def log_ack(ack_msg_id, action, text=None):
     """Log an ACK message event to the ack_log table."""
@@ -105,21 +162,36 @@ def log_ack(ack_msg_id, action, text=None):
         pass
 
 def delete_ack(ack_msg_id, chat_id):
-    """Delete an ACK message and log the deletion to ack_log."""
+    """Unpin (if pinned), delete an ACK message and log the deletion to ack_log.
+
+    Called from both finish() and fail(), so success and error paths both unpin.
+    """
+    try:
+        unpin_ack(ack_msg_id, chat_id)
+    except Exception:
+        pass
     tg_delete(chat_id, ack_msg_id)
     log_ack(ack_msg_id, "deleted")
 
 def finish(args, success_text, error_text=None):
-    """Stop typing, send final reply, then delete ACK."""
+    """Stop typing, send final reply, then delete ACK.
+    If args.voice_transcription is set, prepend a voice-echo header per worker.md MANDATORY rule."""
     stop_typing(args.orig_id)
-    tg_reply(args.chat_id, success_text, reply_to=args.orig_id)
+    final_text = success_text
+    if getattr(args, "voice_transcription", None):
+        final_text = f'{RLM}🎤 "{args.voice_transcription}"\n\n{success_text}'
+    tg_reply(args.chat_id, final_text, reply_to=args.orig_id)
     delete_ack(args.ack_id, args.chat_id)
     print("ok")
 
 def fail(args, error_text):
-    """Stop typing, send error reply, then delete ACK."""
+    """Stop typing, send error reply, then delete ACK.
+    If args.voice_transcription is set, prepend a voice-echo header per worker.md MANDATORY rule."""
     stop_typing(args.orig_id)
-    tg_reply(args.chat_id, f"{RLM}❌ {error_text}", reply_to=args.orig_id)
+    body = f"{RLM}❌ {error_text}"
+    if getattr(args, "voice_transcription", None):
+        body = f'{RLM}🎤 "{args.voice_transcription}"\n\n{body}'
+    tg_reply(args.chat_id, body, reply_to=args.orig_id)
     delete_ack(args.ack_id, args.chat_id)
     print(f"fail: {error_text}", file=sys.stderr)
 

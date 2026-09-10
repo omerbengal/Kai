@@ -1,6 +1,6 @@
 # כללים קריטיים — תזכורת אוטומטית
 
-1. **ACK timing**: Delete ACK only AFTER sending the final reply. Order: stop_typing → tg_reply → tg_delete. Never delete first.
+1. **ACK timing**: Delete ACK only AFTER sending the final reply. Order: tg_reply → tg_delete. Never delete first. Never call start_typing/stop_typing — the hooks own the typing indicator (investigation #043).
 
 2. **Silent edits forbidden**: Any Edit or Write tool call made in response to Omer's Telegram message MUST be followed immediately by a Telegram reply: "✅ [what changed]". Omer watches Telegram not terminal.
 

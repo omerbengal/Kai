@@ -36,6 +36,40 @@ def send_telegram(text: str, conn=None):
     return tg_msg_id
 
 
+# A recurring reminder nags every 5 min until acknowledged, but gives up after this many
+# nags (24 x 5 min = 2h) and rolls forward to the next occurrence, so an unacknowledged
+# daily reminder cannot nag all the way into the following day.
+MAX_RECURRING_NAGS = 24
+
+RECURRENCE_STEP = {
+    'daily': '+1 day',
+    'weekly': '+7 days',
+    'monthly': '+1 month',
+    'yearly': '+1 year',
+}
+
+
+def advance_recurring(cur, rid, recurrence, series_at):
+    """Move a recurring reminder to its next occurrence after series_at and clear the nag state.
+
+    Steps forward repeatedly so a stale series_at (e.g. a reminder that was paused or
+    manually rescheduled) still lands on a future time instead of firing instantly.
+    """
+    step = RECURRENCE_STEP.get(recurrence)
+    if step is None:
+        return
+    next_at = series_at
+    for _ in range(400):
+        next_at = cur.execute("SELECT datetime(?, ?)", (next_at, step)).fetchone()[0]
+        if cur.execute("SELECT ? > datetime('now')", (next_at,)).fetchone()[0]:
+            break
+    cur.execute(
+        "UPDATE reminders SET trigger_at = ?, series_at = NULL, nag_count = 0, status = 'pending' "
+        "WHERE id = ?",
+        (next_at, rid)
+    )
+
+
 def run_heartbeat():
     now_jerusalem = datetime.now(JERUSALEM_TZ)
     hour = now_jerusalem.hour
@@ -53,10 +87,10 @@ def run_heartbeat():
     try:
         # Step 1: Due reminders
         cur.execute(
-            "SELECT id, message, recurrence FROM reminders "
+            "SELECT id, message, recurrence, trigger_at, series_at, COALESCE(nag_count, 0) FROM reminders "
             "WHERE trigger_at <= datetime('now') AND status = 'pending'"
         )
-        for rid, message, recurrence in cur.fetchall():
+        for rid, message, recurrence, trigger_at, series_at, nag_count in cur.fetchall():
             try:
                 tg_msg_id = send_telegram(f"⏰ {message}", conn=conn)
                 if tg_msg_id:
@@ -72,14 +106,23 @@ def run_heartbeat():
                         "UPDATE reminders SET status = 'pending', trigger_at = datetime(trigger_at, '+5 minutes') WHERE id = ?",
                         (rid,)
                     )
-                elif recurrence == 'daily':
-                    cur.execute("UPDATE reminders SET trigger_at = datetime(trigger_at, '+1 day') WHERE id = ?", (rid,))
-                elif recurrence == 'weekly':
-                    cur.execute("UPDATE reminders SET trigger_at = datetime(trigger_at, '+7 days') WHERE id = ?", (rid,))
-                elif recurrence == 'monthly':
-                    cur.execute("UPDATE reminders SET trigger_at = datetime(trigger_at, '+1 month') WHERE id = ?", (rid,))
-                elif recurrence == 'yearly':
-                    cur.execute("UPDATE reminders SET trigger_at = datetime(trigger_at, '+1 year') WHERE id = ?", (rid,))
+                else:
+                    # Recurring reminders nag too (see investigation #041). series_at pins the
+                    # occurrence that is currently being nagged about, so the next occurrence is
+                    # always computed from the scheduled time and never drifts by the nag offsets.
+                    if series_at is None:
+                        series_at = trigger_at
+                        cur.execute("UPDATE reminders SET series_at = ? WHERE id = ?", (series_at, rid))
+                    nag_count += 1
+                    if nag_count < MAX_RECURRING_NAGS:
+                        cur.execute(
+                            "UPDATE reminders SET trigger_at = datetime(trigger_at, '+5 minutes'), "
+                            "nag_count = ? WHERE id = ?",
+                            (nag_count, rid)
+                        )
+                    else:
+                        # Nag cap reached without an ack — give up on this occurrence, move to next
+                        advance_recurring(cur, rid, recurrence, series_at)
                 conn.commit()  # commit immediately so status is saved even if later steps fail
             except Exception as e:
                 errors.append(f"reminder:{rid}:{e}")

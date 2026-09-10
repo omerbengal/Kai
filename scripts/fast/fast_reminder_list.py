@@ -8,8 +8,9 @@ from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, 'D:/Kai/scripts/fast')
 from _base import *
+import local_tz  # home timezone (travel-mode aware) - scripts/local_tz.py
 
-JERUSALEM = timezone(timedelta(hours=3))
+JERUSALEM = local_tz.home_tz()  # was fixed UTC+3; travel-mode aware
 
 RECURRENCE_LABELS = {
     'daily':   '🔁 יומי',
@@ -48,7 +49,8 @@ def main():
             finish(args, f'{RLM}אין תזכורות קרובות ב-{args.days} הימים הקרובים')
             return
 
-        lines = [f'{RLM}⏰ תזכורות קרובות ({len(rows)}):']
+        lbl = local_tz.tz_label()
+        lines = [f'{RLM}⏰ תזכורות קרובות ({len(rows)})' + (f' - שעון {lbl}' if lbl else '') + ':']
         for row in rows:
             # Parse trigger_at — may be "YYYY-MM-DD HH:MM:SS" or ISO format
             trigger_str = row['trigger_at']

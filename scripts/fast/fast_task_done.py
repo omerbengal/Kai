@@ -2,22 +2,24 @@
 """
 Fast task completion — mark a task as done by partial title match.
 Usage: python fast_task_done.py --title "partial title" --ack_id N --orig_id N --chat_id ${KAI_TELEGRAM_CHAT_ID}
-       Optional: --completed_at "YYYY-MM-DD HH:MM" (Jerusalem time, UTC+3) to set a custom completion timestamp
+       Optional: --completed_at "YYYY-MM-DD HH:MM" (LOCAL time; --israel_time forces Israel) to set a custom completion timestamp
 """
 import sys
 sys.path.insert(0, 'D:/Kai/scripts/fast')
 from _base import *
+import local_tz  # home timezone (travel-mode aware) - scripts/local_tz.py
 from datetime import datetime, timezone, timedelta
 
 def main():
     p = base_args("Mark a task as done")
     p.add_argument("--title", required=True, help="Partial task title to match")
-    p.add_argument("--completed_at", default=None, help='Custom completion time in Jerusalem time, format: "YYYY-MM-DD HH:MM"')
+    p.add_argument("--completed_at", default=None, help='Custom completion time in LOCAL time, format: "YYYY-MM-DD HH:MM"')
+    p.add_argument("--israel_time", action="store_true", help="Interpret --completed_at as Israel time even while abroad")
     args = p.parse_args()
 
     # Resolve completed_at timestamp
     if args.completed_at:
-        JLM = timezone(timedelta(hours=3))
+        JLM = local_tz.israel_tz() if args.israel_time else local_tz.home_tz()
         dt = datetime.strptime(args.completed_at, '%Y-%m-%d %H:%M').replace(tzinfo=JLM)
         completed_at_utc = dt.astimezone(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
         completed_at_sql = f"'{completed_at_utc}'"

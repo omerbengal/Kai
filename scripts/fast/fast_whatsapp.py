@@ -23,7 +23,16 @@ sys.path.insert(0, 'D:/Kai/scripts/fast')
 from _base import *
 
 SUFFIX = "\n[נשלח על ידי קאי 🤖]"
+SUFFIX_BARE = "[נשלח על ידי קאי 🤖]"
 DEDUP_WINDOW_SECONDS = 60
+
+
+def _ensure_signature(text):
+    if not text:
+        return text
+    if text.rstrip().endswith(SUFFIX_BARE):
+        return text
+    return text + SUFFIX
 
 def main():
     p = base_args("Send WhatsApp to individual")
@@ -83,7 +92,7 @@ def main():
 
         if args.file_path:
             # Send file (with optional caption)
-            caption = (args.message + SUFFIX) if args.message else None
+            caption = _ensure_signature(args.message) if args.message else None
             success = whatsapp_send_file(jid, args.file_path, caption=caption)
             file_name = os.path.basename(args.file_path)
             if success:
@@ -96,7 +105,7 @@ def main():
                 fail(args, f'שליחת הקובץ ל-{display_name} נכשלה')
         else:
             # Text only (existing behavior)
-            full_message = args.message + SUFFIX
+            full_message = _ensure_signature(args.message)
             success = whatsapp_send(jid, full_message)
             if success:
                 action_log("fast_whatsapp", "sent", f"to={display_name} jid={jid} dedup={dedup_key}")

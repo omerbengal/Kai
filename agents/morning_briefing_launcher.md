@@ -14,4 +14,17 @@ with open('D:/Kai/agents/morning_briefing.md', encoding='utf-8') as f:
 
 Then call `Agent(prompt=briefing_prompt, run_in_background=True)`.
 
+## Sanity logging
+
+Before spawning the agent, log the trigger time so we can measure agent runtime later:
+
+```python
+import sqlite3
+conn = sqlite3.connect('D:/Kai/kai.db')
+conn.execute("INSERT INTO action_log (agent, action, details) VALUES ('morning_briefing','launcher_triggered','')")
+conn.commit(); conn.close()
+```
+
+Agent runtime can then be measured as `briefing_sent.created_at - launcher_triggered.created_at`.
+
 That's all — the agent handles everything from there (DB queries, weather, calendar, email, Telegram send).

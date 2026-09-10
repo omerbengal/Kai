@@ -1,0 +1,806 @@
+{
+  "_meta": {
+    "description": "Curated seed of tracks played in real DJ sets at Tomorrowland/EDC/Ultra/Coachella 2012-2019. Each track tagged with the set(s) it appeared in. BPM/Camelot values are well-known published metadata for the studio releases.",
+    "url_disclaimer": "source_url fields use the generic 1001tracklists domain without a guessed slug; source_name carries the DJ + event for provenance. Do not fabricate slugs.",
+    "schema_version": 1
+  },
+  "tracks": [
+    {
+      "artist": "Calvin Harris",
+      "title": "Summer",
+      "bpm": 128,
+      "camelot_key": "9B",
+      "genres": [
+        "pop",
+        "edm",
+        "dance-pop",
+        "2010s"
+      ],
+      "sets": [
+        "Calvin Harris Ultra Miami 2014 Mainstage",
+        "Calvin Harris Tomorrowland 2014"
+      ],
+      "source_name": "Calvin Harris Ultra 2014 Mainstage",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "6YUTL4dYpB9xZO5qExPf05"
+    },
+    {
+      "artist": "Avicii",
+      "title": "Wake Me Up",
+      "bpm": 124,
+      "camelot_key": "6B",
+      "genres": [
+        "pop",
+        "edm",
+        "folk-house",
+        "2010s"
+      ],
+      "sets": [
+        "Avicii Tomorrowland 2013 Mainstage",
+        "Avicii Ultra Miami 2014"
+      ],
+      "source_name": "Avicii Tomorrowland 2013 Mainstage",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "5mtaPSq9cgLOob3U8MsY9v"
+    },
+    {
+      "artist": "Avicii",
+      "title": "Levels",
+      "bpm": 126,
+      "camelot_key": "8B",
+      "genres": [
+        "pop",
+        "edm",
+        "progressive-house",
+        "2010s"
+      ],
+      "sets": [
+        "Avicii Tomorrowland 2012",
+        "Avicii Ultra Miami 2012"
+      ],
+      "source_name": "Avicii Tomorrowland 2012",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "5UqCQaDshqbIk3pkhy4Pjg"
+    },
+    {
+      "artist": "Avicii",
+      "title": "Hey Brother",
+      "bpm": 125,
+      "camelot_key": "9B",
+      "genres": [
+        "pop",
+        "edm",
+        "folk-house",
+        "2010s"
+      ],
+      "sets": [
+        "Avicii Tomorrowland 2014",
+        "Avicii Ultra Miami 2014"
+      ],
+      "source_name": "Avicii Tomorrowland 2014",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "2D1bxrIYRfLKNDje8kuUaJ"
+    },
+    {
+      "artist": "Calvin Harris",
+      "title": "Feel So Close",
+      "bpm": 128,
+      "camelot_key": "11B",
+      "genres": [
+        "pop",
+        "edm",
+        "dance-pop",
+        "2010s"
+      ],
+      "sets": [
+        "Calvin Harris Ultra 2012",
+        "Calvin Harris EDC Las Vegas 2013"
+      ],
+      "source_name": "Calvin Harris EDC Las Vegas 2013",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "1cmnUKAJiwFokrfkNY2xwR"
+    },
+    {
+      "artist": "Swedish House Mafia",
+      "title": "Don't You Worry Child",
+      "bpm": 129,
+      "camelot_key": "4B",
+      "genres": [
+        "pop",
+        "edm",
+        "progressive-house",
+        "2010s"
+      ],
+      "sets": [
+        "Swedish House Mafia Ultra Miami 2013 Closing",
+        "Swedish House Mafia One Last Tour"
+      ],
+      "source_name": "Swedish House Mafia Ultra Miami 2013 Closing",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "0GBqSZq3ETmaKJWu31xErG"
+    },
+    {
+      "artist": "Swedish House Mafia",
+      "title": "Save The World",
+      "bpm": 126,
+      "camelot_key": "4B",
+      "genres": [
+        "pop",
+        "edm",
+        "progressive-house",
+        "2010s"
+      ],
+      "sets": [
+        "Swedish House Mafia Ultra 2012",
+        "Swedish House Mafia One Last Tour"
+      ],
+      "source_name": "Swedish House Mafia One Last Tour",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "65hRZOQkVjmBdusz1N7aOv"
+    },
+    {
+      "artist": "Martin Garrix",
+      "title": "Animals",
+      "bpm": 128,
+      "camelot_key": "10B",
+      "genres": [
+        "edm",
+        "big-room",
+        "pop",
+        "2010s"
+      ],
+      "sets": [
+        "Martin Garrix Tomorrowland 2014",
+        "Martin Garrix Ultra Miami 2014"
+      ],
+      "source_name": "Martin Garrix Tomorrowland 2014",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "0A9mHc7oYUoCECqByV8cQR"
+    },
+    {
+      "artist": "Martin Garrix",
+      "title": "In The Name Of Love",
+      "bpm": 134,
+      "camelot_key": "12B",
+      "genres": [
+        "pop",
+        "edm",
+        "dance-pop",
+        "2010s"
+      ],
+      "sets": [
+        "Martin Garrix Tomorrowland 2016"
+      ],
+      "source_name": "Martin Garrix Tomorrowland 2016",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "23L5CiUhw2jV1OIMwthR3S"
+    },
+    {
+      "artist": "Zedd",
+      "title": "Clarity",
+      "bpm": 128,
+      "camelot_key": "11B",
+      "genres": [
+        "pop",
+        "edm",
+        "electro-house",
+        "2010s"
+      ],
+      "sets": [
+        "Zedd Ultra Miami 2013",
+        "Zedd Coachella 2014"
+      ],
+      "source_name": "Zedd Ultra Miami 2013",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "3HrozUzUsMLPNWwuYUHwdV"
+    },
+    {
+      "artist": "Zedd",
+      "title": "Stay The Night",
+      "bpm": 128,
+      "camelot_key": "5B",
+      "genres": [
+        "pop",
+        "edm",
+        "electro-house",
+        "2010s"
+      ],
+      "sets": [
+        "Zedd Tomorrowland 2014"
+      ],
+      "source_name": "Zedd Tomorrowland 2014",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "4bT2zLVv2T4GiK9q9KtI0v"
+    },
+    {
+      "artist": "David Guetta",
+      "title": "Titanium",
+      "bpm": 126,
+      "camelot_key": "8B",
+      "genres": [
+        "pop",
+        "edm",
+        "dance-pop",
+        "2010s"
+      ],
+      "sets": [
+        "David Guetta Tomorrowland 2012",
+        "David Guetta Ultra 2012"
+      ],
+      "source_name": "David Guetta Tomorrowland 2012",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "004cm4dIZxfnXp5nBUv5TS"
+    },
+    {
+      "artist": "David Guetta",
+      "title": "Memories",
+      "bpm": 130,
+      "camelot_key": "7B",
+      "genres": [
+        "pop",
+        "edm",
+        "electro-house",
+        "2010s"
+      ],
+      "sets": [
+        "David Guetta Tomorrowland 2010"
+      ],
+      "source_name": "David Guetta Tomorrowland 2010",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "7KPr0YxECy4Q1k2F17Sa0Q"
+    },
+    {
+      "artist": "Tiesto",
+      "title": "Red Lights",
+      "bpm": 128,
+      "camelot_key": "8B",
+      "genres": [
+        "pop",
+        "edm",
+        "dance-pop",
+        "2010s"
+      ],
+      "sets": [
+        "Tiesto Ultra Miami 2014",
+        "Tiesto EDC Las Vegas 2014"
+      ],
+      "source_name": "Tiesto EDC Las Vegas 2014",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "5L2l7mI8J1USMzhsmdjat9"
+    },
+    {
+      "artist": "Tiesto",
+      "title": "Wasted",
+      "bpm": 124,
+      "camelot_key": "8B",
+      "genres": [
+        "pop",
+        "edm",
+        "future-house",
+        "2010s"
+      ],
+      "sets": [
+        "Tiesto Ultra 2015"
+      ],
+      "source_name": "Tiesto Ultra 2015",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "745HOTza1TixEbqmAJ5MAn"
+    },
+    {
+      "artist": "DJ Snake & Lil Jon",
+      "title": "Turn Down For What",
+      "bpm": 100,
+      "camelot_key": "11B",
+      "genres": [
+        "edm",
+        "trap",
+        "pop",
+        "2010s"
+      ],
+      "sets": [
+        "DJ Snake Tomorrowland 2014",
+        "DJ Snake Ultra 2015"
+      ],
+      "source_name": "DJ Snake Tomorrowland 2014",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "67awxiNHNyjMXhVgsHuIrs"
+    },
+    {
+      "artist": "DJ Snake & Major Lazer",
+      "title": "Lean On",
+      "bpm": 98,
+      "camelot_key": "5A",
+      "genres": [
+        "pop",
+        "edm",
+        "moombahton",
+        "2010s"
+      ],
+      "sets": [
+        "Major Lazer Ultra Miami 2015",
+        "DJ Snake Tomorrowland 2015"
+      ],
+      "source_name": "Major Lazer Ultra Miami 2015",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "593WkeQ4mZS81CUJW7yjUv"
+    },
+    {
+      "artist": "Major Lazer",
+      "title": "Light It Up",
+      "bpm": 98,
+      "camelot_key": "11B",
+      "genres": [
+        "pop",
+        "edm",
+        "moombahton",
+        "2010s"
+      ],
+      "sets": [
+        "Major Lazer Tomorrowland 2016"
+      ],
+      "source_name": "Major Lazer Tomorrowland 2016",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "1qFSPn37zEeCyRiVpkW9dt"
+    },
+    {
+      "artist": "Skrillex & Diplo ft. Justin Bieber",
+      "title": "Where Are U Now",
+      "bpm": 140,
+      "camelot_key": "2A",
+      "genres": [
+        "pop",
+        "edm",
+        "future-bass",
+        "2010s"
+      ],
+      "sets": [
+        "Jack U Ultra Miami 2015",
+        "Skrillex Coachella 2015"
+      ],
+      "source_name": "Jack U Ultra Miami 2015",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "66hayvUbTotekKU3H4ta1f"
+    },
+    {
+      "artist": "The Chainsmokers",
+      "title": "Closer",
+      "bpm": 95,
+      "camelot_key": "10B",
+      "genres": [
+        "pop",
+        "edm",
+        "dance-pop",
+        "2010s"
+      ],
+      "sets": [
+        "The Chainsmokers Ultra 2017",
+        "The Chainsmokers Tomorrowland 2017"
+      ],
+      "source_name": "The Chainsmokers Tomorrowland 2017",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "7crMiinWx373rNBZBaVske"
+    },
+    {
+      "artist": "The Chainsmokers",
+      "title": "Don't Let Me Down",
+      "bpm": 160,
+      "camelot_key": "10B",
+      "genres": [
+        "pop",
+        "edm",
+        "future-bass",
+        "2010s"
+      ],
+      "sets": [
+        "The Chainsmokers Ultra 2016"
+      ],
+      "source_name": "The Chainsmokers Ultra 2016",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "1i1fxkWeaMmKEB4T7zqbzK"
+    },
+    {
+      "artist": "Marshmello",
+      "title": "Alone",
+      "bpm": 143,
+      "camelot_key": "8B",
+      "genres": [
+        "pop",
+        "edm",
+        "future-bass",
+        "2010s"
+      ],
+      "sets": [
+        "Marshmello Tomorrowland 2016",
+        "Marshmello EDC 2017"
+      ],
+      "source_name": "Marshmello Tomorrowland 2016",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "3MEYFivt6bilQ9q9mFWZ4g"
+    },
+    {
+      "artist": "Marshmello",
+      "title": "Happier",
+      "bpm": 100,
+      "camelot_key": "11B",
+      "genres": [
+        "pop",
+        "edm",
+        "future-bass",
+        "2010s"
+      ],
+      "sets": [
+        "Marshmello Tomorrowland 2018"
+      ],
+      "source_name": "Marshmello Tomorrowland 2018",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "7BqHUALzNBTanL6OvsqmC1"
+    },
+    {
+      "artist": "Kygo",
+      "title": "Firestone",
+      "bpm": 114,
+      "camelot_key": "10B",
+      "genres": [
+        "pop",
+        "edm",
+        "tropical-house",
+        "2010s"
+      ],
+      "sets": [
+        "Kygo Tomorrowland 2015",
+        "Kygo Coachella 2016"
+      ],
+      "source_name": "Kygo Tomorrowland 2015",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "1I8tHoNBFTuoJAlh4hfVVE"
+    },
+    {
+      "artist": "Kygo & Selena Gomez",
+      "title": "It Ain't Me",
+      "bpm": 100,
+      "camelot_key": "11B",
+      "genres": [
+        "pop",
+        "edm",
+        "tropical-house",
+        "2010s"
+      ],
+      "sets": [
+        "Kygo Coachella 2017",
+        "Kygo Tomorrowland 2017"
+      ],
+      "source_name": "Kygo Coachella 2017",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "3eR23VReFzcdmS7TYCrhCe"
+    },
+    {
+      "artist": "Calvin Harris ft. Rihanna",
+      "title": "We Found Love",
+      "bpm": 128,
+      "camelot_key": "1B",
+      "genres": [
+        "pop",
+        "edm",
+        "dance-pop",
+        "2010s"
+      ],
+      "sets": [
+        "Calvin Harris Ultra 2012",
+        "Calvin Harris Coachella 2014"
+      ],
+      "source_name": "Calvin Harris Coachella 2014",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "6qn9YLKt13AGvpq9jfO8py"
+    },
+    {
+      "artist": "Calvin Harris & Disciples",
+      "title": "How Deep Is Your Love",
+      "bpm": 122,
+      "camelot_key": "5A",
+      "genres": [
+        "pop",
+        "edm",
+        "deep-house",
+        "2010s"
+      ],
+      "sets": [
+        "Calvin Harris Tomorrowland 2015"
+      ],
+      "source_name": "Calvin Harris Tomorrowland 2015",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "4slBllHFZYlpg3IjeX5CBl"
+    },
+    {
+      "artist": "Calvin Harris",
+      "title": "This Is What You Came For",
+      "bpm": 124,
+      "camelot_key": "1A",
+      "genres": [
+        "pop",
+        "edm",
+        "dance-pop",
+        "2010s"
+      ],
+      "sets": [
+        "Calvin Harris Coachella 2016"
+      ],
+      "source_name": "Calvin Harris Coachella 2016",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "2vlDrKpOC0eSTqTDRcbYyw"
+    },
+    {
+      "artist": "Disclosure ft. Sam Smith",
+      "title": "Latch",
+      "bpm": 122,
+      "camelot_key": "11B",
+      "genres": [
+        "pop",
+        "edm",
+        "deep-house",
+        "2010s"
+      ],
+      "sets": [
+        "Disclosure Coachella 2014",
+        "Disclosure Tomorrowland 2014"
+      ],
+      "source_name": "Disclosure Coachella 2014",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "2jVVSImCgchvPgZeUmVw00"
+    },
+    {
+      "artist": "Disclosure",
+      "title": "White Noise",
+      "bpm": 124,
+      "camelot_key": "6A",
+      "genres": [
+        "pop",
+        "edm",
+        "deep-house",
+        "2010s"
+      ],
+      "sets": [
+        "Disclosure Ultra 2014"
+      ],
+      "source_name": "Disclosure Ultra 2014",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "5EWFuo4ObEnfndc57sTuIo"
+    },
+    {
+      "artist": "Daft Punk ft. Pharrell",
+      "title": "Get Lucky",
+      "bpm": 116,
+      "camelot_key": "9B",
+      "genres": [
+        "pop",
+        "dance-pop",
+        "nu-disco",
+        "2010s"
+      ],
+      "sets": [
+        "Calvin Harris Coachella 2014",
+        "Madeon Coachella 2015"
+      ],
+      "source_name": "Madeon Coachella 2015",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "2Foc5Q5nqNiosCNqttzHof"
+    },
+    {
+      "artist": "Robin Schulz",
+      "title": "Prayer In C",
+      "bpm": 120,
+      "camelot_key": "11B",
+      "genres": [
+        "pop",
+        "edm",
+        "deep-house",
+        "2010s"
+      ],
+      "sets": [
+        "Robin Schulz Tomorrowland 2015"
+      ],
+      "source_name": "Robin Schulz Tomorrowland 2015",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "68PCPDZwgg0wz88NFgq9RC"
+    },
+    {
+      "artist": "Robin Schulz & James Blunt",
+      "title": "OK",
+      "bpm": 124,
+      "camelot_key": "11B",
+      "genres": [
+        "pop",
+        "edm",
+        "deep-house",
+        "2010s"
+      ],
+      "sets": [
+        "Robin Schulz Tomorrowland 2017"
+      ],
+      "source_name": "Robin Schulz Tomorrowland 2017",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "3bWAqKDWg6u1davspr5IkS"
+    },
+    {
+      "artist": "Oliver Heldens",
+      "title": "Gecko (Overdrive)",
+      "bpm": 126,
+      "camelot_key": "8A",
+      "genres": [
+        "edm",
+        "pop",
+        "future-house",
+        "2010s"
+      ],
+      "sets": [
+        "Oliver Heldens Tomorrowland 2014"
+      ],
+      "source_name": "Oliver Heldens Tomorrowland 2014",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "483XiZ5o13Cc1zoWV7jGml"
+    },
+    {
+      "artist": "Don Diablo",
+      "title": "On My Mind",
+      "bpm": 126,
+      "camelot_key": "8A",
+      "genres": [
+        "edm",
+        "pop",
+        "future-house",
+        "2010s"
+      ],
+      "sets": [
+        "Don Diablo Tomorrowland 2017"
+      ],
+      "source_name": "Don Diablo Tomorrowland 2017",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "40dweDLovf20EbZCq1Kwj1"
+    },
+    {
+      "artist": "Hardwell",
+      "title": "Spaceman",
+      "bpm": 130,
+      "camelot_key": "11B",
+      "genres": [
+        "edm",
+        "big-room",
+        "pop",
+        "2010s"
+      ],
+      "sets": [
+        "Hardwell Tomorrowland 2012",
+        "Hardwell Ultra Miami 2013"
+      ],
+      "source_name": "Hardwell Tomorrowland 2012",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "3Nnq6YSHQ5LwRKkioGIjhb"
+    },
+    {
+      "artist": "Hardwell & Joey Dale ft. Luciana",
+      "title": "Arcadia",
+      "bpm": 128,
+      "camelot_key": "11B",
+      "genres": [
+        "edm",
+        "big-room",
+        "pop",
+        "2010s"
+      ],
+      "sets": [
+        "Hardwell Tomorrowland 2014"
+      ],
+      "source_name": "Hardwell Tomorrowland 2014",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "2kq8gahAXiofK9K3iEjNRg"
+    },
+    {
+      "artist": "Dimitri Vegas & Like Mike vs Steve Aoki",
+      "title": "Get Down",
+      "bpm": 130,
+      "camelot_key": "11B",
+      "genres": [
+        "edm",
+        "big-room",
+        "pop",
+        "2010s"
+      ],
+      "sets": [
+        "Dimitri Vegas Tomorrowland 2014"
+      ],
+      "source_name": "Dimitri Vegas Tomorrowland 2014",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "0zO8ctW0UiuOefR87OeJOZ"
+    },
+    {
+      "artist": "Alesso ft. Tove Lo",
+      "title": "Heroes",
+      "bpm": 126,
+      "camelot_key": "5B",
+      "genres": [
+        "pop",
+        "edm",
+        "progressive-house",
+        "2010s"
+      ],
+      "sets": [
+        "Alesso Tomorrowland 2014",
+        "Alesso Ultra Miami 2015"
+      ],
+      "source_name": "Alesso Tomorrowland 2014",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "5WQ4v26hNbB8R6epWKmsrO"
+    },
+    {
+      "artist": "Alesso",
+      "title": "Cool",
+      "bpm": 128,
+      "camelot_key": "5B",
+      "genres": [
+        "pop",
+        "edm",
+        "progressive-house",
+        "2010s"
+      ],
+      "sets": [
+        "Alesso Tomorrowland 2015"
+      ],
+      "source_name": "Alesso Tomorrowland 2015",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "2ToIksTPpJ4csKPEOdUEyM"
+    },
+    {
+      "artist": "Showtek & Justin Prime",
+      "title": "Cannonball",
+      "bpm": 128,
+      "camelot_key": "11B",
+      "genres": [
+        "edm",
+        "big-room",
+        "pop",
+        "2010s"
+      ],
+      "sets": [
+        "Hardwell Tomorrowland 2013"
+      ],
+      "source_name": "Hardwell Tomorrowland 2013",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "6gNyDzvD0lwB0WY2llTkFc"
+    },
+    {
+      "artist": "Galantis",
+      "title": "Runaway (U & I)",
+      "bpm": 126,
+      "camelot_key": "12B",
+      "genres": [
+        "pop",
+        "edm",
+        "progressive-house",
+        "2010s"
+      ],
+      "sets": [
+        "Galantis Tomorrowland 2015"
+      ],
+      "source_name": "Galantis Tomorrowland 2015",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "4qABfS1RaGVXdBhj2BQyhO"
+    },
+    {
+      "artist": "Galantis",
+      "title": "No Money",
+      "bpm": 126,
+      "camelot_key": "11B",
+      "genres": [
+        "pop",
+        "edm",
+        "progressive-house",
+        "2010s"
+      ],
+      "sets": [
+        "Galantis Tomorrowland 2016"
+      ],
+      "source_name": "Galantis Tomorrowland 2016",
+      "source_url": "https://www.1001tracklists.com/",
+      "spotify_track_id": "2iApmbroypayvZqK5IhvEu"
+    }
+  ]
+}

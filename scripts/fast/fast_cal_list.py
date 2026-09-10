@@ -6,10 +6,11 @@ Usage: python fast_cal_list.py --days 7 --ack_id N --orig_id N --chat_id ${KAI_T
 import sys
 sys.path.insert(0, 'D:/Kai/scripts/fast')
 from _base import *
+import local_tz  # home timezone (travel-mode aware) - scripts/local_tz.py
 from _gcal import get_calendar_service, format_event_for_display
 from datetime import datetime, timezone, timedelta
 
-JERUSALEM = timezone(timedelta(hours=3))
+JERUSALEM = local_tz.home_tz()  # was fixed UTC+3; travel-mode aware
 MAX_EVENTS = 20
 
 
@@ -42,7 +43,8 @@ def main():
             finish(args, f"{RLM}📅 אין אירועים ב-{args.days} הימים הקרובים.")
             return
 
-        lines = [f"{RLM}📅 {len(events)} אירועים ב-{args.days} הימים הקרובים:"]
+        lbl = local_tz.tz_label()
+        lines = [f"{RLM}📅 {len(events)} אירועים ב-{args.days} הימים הקרובים" + (f" (שעון {lbl})" if lbl else "") + ":"]
         lines.append(f"{RLM}{'─' * 28}")
         for event in events:
             lines.append(format_event_for_display(event))

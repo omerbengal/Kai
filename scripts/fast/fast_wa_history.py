@@ -6,6 +6,7 @@ Usage: python fast_wa_history.py --name "שם" --count 20 --ack_id N --orig_id N
 import sys
 sys.path.insert(0, 'D:/Kai/scripts/fast')
 from _base import *
+import local_tz  # home timezone (travel-mode aware) - scripts/local_tz.py
 import sqlite3
 from datetime import datetime, timezone, timedelta
 
@@ -58,7 +59,7 @@ def main():
                     dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
                 else:
                     dt = datetime.fromtimestamp(float(ts), tz=timezone.utc)
-                dt_jlm = dt.astimezone(timezone(timedelta(hours=3)))
+                dt_jlm = dt.astimezone(local_tz.home_tz())
                 time_str = dt_jlm.strftime("%d/%m %H:%M")
             except Exception:
                 time_str = str(ts)

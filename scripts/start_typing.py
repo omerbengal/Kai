@@ -31,12 +31,13 @@ def main():
 
     chat_id = sys.argv[1]
     worker_id = sys.argv[2]
+    initial_delay = sys.argv[3] if len(sys.argv) >= 4 else "0"
 
     pid_file = os.path.join(TMP_DIR, f"typing_pid_{worker_id}.txt")
     os.makedirs(TMP_DIR, exist_ok=True)
 
     proc = subprocess.Popen(
-        [sys.executable, TYPING_LOOP, chat_id, pid_file],
+        [sys.executable, TYPING_LOOP, chat_id, pid_file, str(initial_delay)],
         creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
         close_fds=True,
         stdin=subprocess.DEVNULL,

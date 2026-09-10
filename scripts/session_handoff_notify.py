@@ -5,14 +5,9 @@ Reads D:/Kai/tmp/session_handoff.md (if it exists) and prints it to stdout
 so the new Claude session sees the prior conversation context at startup.
 Called from SessionStart hook (async: false).
 
-Always emits the STARTUP ACTIONS REQUIRED block. Claude Code's cron store
-(.claude/scheduled_tasks.json) does NOT survive a restart even with
-durable=true, so the morning briefing cron must be re-registered at the
-beginning of every fresh session. session_start_cleanup.py deletes the
-stale cron_registered_sentinel from the previous session to keep the flow
-honest; the sentinel is now purely a session-scoped marker (created by
-Claude after CronCreate succeeds) that the listener/dispatcher can use to
-avoid re-triggering CronCreate within the same session.
+The morning briefing is owned by the KaiMorningBriefing Windows scheduled
+task (scripts/run_morning_briefing.py), which fires at 09:00 sharp. This
+script no longer asks Claude to register a duplicate cron job for it.
 """
 
 import sys
@@ -27,20 +22,37 @@ else:
 
 HANDOFF_FILE = "D:/Kai/tmp/session_handoff.md"
 
+STARTUP_ACTIONS = ""  # (a personal page-refresh job was removed from the public version)
+
+
+def announce_startup_actions():
+    """Tell the new session to re-register the page-refresh cron."""
+    ids_path = "D:/Kai/.kai_cron_ids"
+    try:
+        with open(ids_path, "r", encoding="utf-8") as f:
+            registered = bool(f.read())
+    except OSError:
+        registered = False
+    # The id from the dead session is stale by definition, so its presence is
+    # not proof of a live job. Announce regardless; re-registering is cheap and
+    # a missing refresh job is silent.
+    del registered
+    print(STARTUP_ACTIONS)
+
+
+def announce_timezone():
+    """Travel mode: tell the new session which timezone Omer is in (never assume UTC+3)."""
+    try:
+        sys.path.insert(0, "D:/Kai/scripts")
+        import local_tz
+        print(local_tz.session_context_line())
+    except Exception as e:
+        print(f"=== TIMEZONE === could not read travel mode ({e}); run python D:/Kai/scripts/travel_mode.py status")
+
 
 def main():
-    # Always print startup actions on session start. The SessionStart hook
-    # only fires once per session, so this block is injected into session
-    # context exactly once — no need to gate on sentinel existence.
-    # Cron state in Claude Code does not survive restarts, so every fresh
-    # session must re-register the morning briefing.
-    print("=== STARTUP ACTIONS REQUIRED ===")
-    print("Immediately call CronCreate to register the morning briefing cron job:")
-    print("  cron='0 9 * * *' (local Israel time = 09:00 Jerusalem), prompt='D:/Kai/agents/morning_briefing_launcher.md', recurring=true, durable=true")
-    print("Save the returned ID to D:/Kai/.kai_cron_ids (update morning_briefing_cron_id line).")
-    print("Note: heartbeat runs via Windows Task Scheduler — do NOT register it as a cron.")
-    print("After saving the ID, create D:/Kai/tmp/cron_registered_sentinel (touch the file) as a session-scoped marker.")
-    print("=================================")
+    announce_timezone()
+    announce_startup_actions()
 
     if not os.path.exists(HANDOFF_FILE):
         return

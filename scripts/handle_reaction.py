@@ -9,6 +9,7 @@ Called by the Telegram plugin (server.ts) via child_process.exec.
 """
 import argparse
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -16,8 +17,11 @@ import io
 import urllib.request
 from typing import Optional
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from heartbeat import advance_recurring  # noqa: E402  (shared recurrence arithmetic)
+
 DB_PATH = 'D:/Kai/kai.db'
-BOT_TOKEN = __import__("os").environ["KAI_TELEGRAM_BOT_TOKEN"]
+BOT_TOKEN = os.environ["KAI_TELEGRAM_BOT_TOKEN"]
 
 
 class MessageNotFound(Exception):
@@ -190,8 +194,9 @@ def _parse_message_type(text: str):
 
 
 def _mark_reminder_by_row(conn: sqlite3.Connection, row: sqlite3.Row, new_status: str) -> None:
-    """Mark a reminder directly by its DB row. Skips recurring reminders on 'dismissed'."""
+    """Mark a reminder directly by its DB row."""
     if row['recurrence'] is not None:
+        _ack_recurring(conn, row, new_status)
         return
     if new_status == 'fired':
         # Un-react: re-start the nag cycle immediately
@@ -221,16 +226,54 @@ def _mark_task_by_row(conn: sqlite3.Connection, row: sqlite3.Row, new_status: st
         )
 
 
+def _ack_recurring(conn: sqlite3.Connection, row: sqlite3.Row, new_status: str) -> None:
+    """Apply a reaction to a recurring reminder.
+
+    Reacting means "handled today's occurrence" — not "cancel the series". So the reminder
+    stops nagging and rolls forward to its next occurrence. Removing the reaction undoes
+    that and resumes nagging right away.
+    """
+    if new_status == 'fired':
+        conn.execute(
+            "UPDATE reminders SET status = 'pending', trigger_at = datetime('now'), "
+            "series_at = NULL, nag_count = 0 WHERE id = ?",
+            (row['id'],)
+        )
+        return
+
+    # Only advance an occurrence that is still the one being nagged about.
+    #
+    # heartbeat.py gives up after MAX_RECURRING_NAGS and advances the series itself,
+    # clearing series_at and leaving trigger_at on the NEXT occurrence. A reaction that
+    # arrives after that point used to advance again from that already-advanced time,
+    # so the series silently skipped a day: reminder 149 was acknowledged 34 minutes
+    # after the nag cap on 2026-08-18 and jumped from the 19th to the 20th, quietly
+    # losing a day. series_at is None with a future trigger_at exactly when the cap has
+    # already done the work - then there is nothing left to advance.
+    already_advanced = (
+        row['series_at'] is None
+        and conn.execute("SELECT ? > datetime('now')", (row['trigger_at'],)).fetchone()[0]
+    )
+    if already_advanced:
+        conn.execute(
+            "UPDATE reminders SET status = 'pending', nag_count = 0 WHERE id = ?",
+            (row['id'],)
+        )
+        return
+
+    advance_recurring(conn, row['id'], row['recurrence'], row['series_at'] or row['trigger_at'])
+
+
 def _mark_reminder(conn: sqlite3.Connection, message_text: str, new_status: str) -> None:
-    """Mark one-shot reminder with matching message text; skip recurring ones on 'dismissed'."""
+    """Mark the reminder with matching message text (text-prefix fallback path)."""
     row = conn.execute(
-        'SELECT id, recurrence, status FROM reminders WHERE message = ?',
+        'SELECT id, recurrence, status, trigger_at, series_at FROM reminders WHERE message = ?',
         (message_text,)
     ).fetchone()
     if row is None:
         return
-    # Only apply to one-shot reminders — recurring ones are managed entirely by the heartbeat
     if row['recurrence'] is not None:
+        _ack_recurring(conn, row, new_status)
         return
     if new_status == 'fired':
         # Un-react: re-start the nag cycle immediately

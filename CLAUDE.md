@@ -8,7 +8,7 @@ Kai (קאי) is Omer's personal AI assistant system. It runs autonomously via Cl
 |-------|---------|------|
 | `agents/listener.md` | On incoming Telegram message | **Dispatcher** — parses intent, spawns a background worker agent, sends acknowledgment, stops |
 | Worker agent (spawned inline) | Spawned by dispatcher | **Executor** — does all actual work, sends Telegram updates at every step |
-| `agents/morning_briefing_launcher.md` | Daily 09:00 Jerusalem time (cron) | Spawns background Agent to compile & send daily briefing |
+| `agents/morning_briefing_launcher.md` | Manual / on-demand only | Spawns background Agent to compile & send daily briefing. The *scheduled* 09:00 briefing runs from `scripts/run_morning_briefing.py` via the `KaiMorningBriefing` Windows task, not from here. |
 | `agents/morning_briefing.md` | Spawned by launcher | Actual briefing logic: DB, weather, calendar, email, Telegram send |
 
 > **Note:** `agents/heartbeat.md` exists but is superseded by `scripts/heartbeat.py`, which runs via Windows Task Scheduler. Ignore the agent version.
@@ -67,6 +67,8 @@ mcp__plugin_telegram_telegram__reply(chat_id="${KAI_TELEGRAM_CHAT_ID}", text="..
 ### Worker update pattern
 Workers **edit ACK_MSG_ID** before each step — not new messages. ACK_MSG_ID is the dispatcher's "🔄 ... — ⏳ מייצר agent..." message. The worker's very first action is to edit it to "🔄 ... — ⚙️ agent מוכן, מתחיל...". All subsequent progress updates also edit that same message. Only the final result is sent as a new reply. This way Omer sees one live-updating status message, plus the final result.
 
+The ACK is also **pinned** while the task runs (`scripts/tg_pin.py` → `pin_ack` / `unpin_ack`, registry at `tmp/pinned_acks.json`) and unpinned right before it is deleted, so the live status stays in the pinned banner even when Omer scrolls to other conversations.
+
 See `agents/listener.md` → Mandatory Telegram Update Protocol for the full standard.
 
 ## Message Persistence
@@ -79,7 +81,7 @@ Query history before claiming "I don't have message history."
 
 ## Session Context
 
-The dispatcher (listener) loads the last 5 messages from the DB on every message and passes them to the worker in the prompt. Workers do not need to re-query context — they receive it pre-loaded.
+The dispatcher (listener) loads the last 20 messages from the DB on every message and passes them to the worker in the prompt. Workers do not need to re-query context — they receive it pre-loaded.
 
 See `agents/listener.md` Step 2 for the exact query.
 
@@ -94,49 +96,60 @@ See `agents/listener.md` Step 2 for the exact query.
 ## Startup
 
 1. `start_claude.bat` launches Claude Code
-2. `SessionStart` hook: patches Telegram plugin, sends "קלוד עלה ✅" to Telegram, runs `session_start_cleanup.py` (which also deletes the stale `cron_registered_sentinel` from the previous session), injects session context + startup instructions
-3. **On every session start**, the `=== STARTUP ACTIONS REQUIRED ===` block will appear in the first message's context — this is expected and will happen **every fresh session**, because Claude Code's cron store (`.claude/scheduled_tasks.json`) does not actually survive a restart even when `durable=true` is set. Call `CronCreate` for the morning briefing **after sending the first ACK** (if a message arrived simultaneously) or immediately (if no message is pending):
-   ⚠️ **ACK always takes priority over CronCreate.** CronCreate can wait 1 extra second; ACK cannot.
-   - `cron="0 9 * * *"` (local Israel time = 09:00 Jerusalem), `prompt="D:/Kai/agents/morning_briefing_launcher.md"`, `recurring=true`, `durable=true`
-   - The launcher spawns a background Agent with `morning_briefing.md` as prompt — main session stays free
-   - Save the returned ID to `D:/Kai/.kai_cron_ids` (update `morning_briefing_cron_id` line)
-   - After saving the ID, create `D:/Kai/tmp/cron_registered_sentinel` (empty file). This is a **session-scoped marker** only — it says "this running session has already registered the cron." It is deleted automatically by `session_start_cleanup.py` at the start of the next session so the block fires again on the fresh session's first message.
-4. Heartbeat runs via **Windows Task Scheduler** (`scripts/heartbeat.py`) — do NOT register it as a cron job
+2. `SessionStart` hook: patches Telegram plugin, sends "קלוד עלה ✅" to Telegram, runs `session_start_cleanup.py`, injects session context
+3. **No cron registration is needed at startup.** Both scheduled jobs run from Windows Task Scheduler, independently of any Claude session:
+   - **Morning briefing** — `KaiMorningBriefing` task → `scripts/run_morning_briefing.py`, daily at 09:00 sharp. It builds and sends the briefing itself and logs `briefing_sent` to `action_log`.
+   - **Heartbeat** — `KaiHeartbeat` task → `scripts/heartbeat.py`
+
+   Do NOT call `CronCreate` for either one. A Claude-side cron would duplicate the task and fire late (the scheduler adds up to 10% jitter). See `agents/morning_briefing_launcher.md` — it is retained only for manual/on-demand briefing runs.
 
 ## When to Use Agents vs In-Session
 
 **For Telegram-initiated tasks: always spawn a worker agent. No exceptions.**
 Consistency in update behavior matters more than saving 2–3 seconds.
 
+**Exceptions** (carve-outs in `agents/listener.md` Step 0):
+- **Option A/B (trivial)** — pure greetings/acks; reaction or short reply, no worker.
+- **Option C (factual inline)** — ≤12-word general-knowledge Q from training data; inline answer.
+- **Option C2 (single-fact web search inline)** — ≤15-word factual Q (dates, holidays, simple facts) that needs ONE web search; WebSearch with 8-sec timeout, fallback to worker on timeout/ambiguity.
+- **Option D (fast scripts)** — deterministic single operations (reminders, tasks, WhatsApp send-with-explicit-text, etc.).
+
 | Situation | Approach |
 |-----------|----------|
 | Any Telegram message (simple or complex) | Dispatcher spawns background worker |
-| Morning briefing (cron-triggered) | In-session (not Telegram-initiated) |
+| Morning briefing (Windows task) | `scripts/run_morning_briefing.py` (standalone, no Agent) |
 | Heartbeat (Task Scheduler) | `scripts/heartbeat.py` (standalone, not via Agent) |
 
 ## Key Conventions
 
+- **Core principles (read first)**: `agents/principles.md` holds Kai's ~11 behavioural principles + the 3-question check before every final reply (בדקתי שזה נכון? / זה מה שביקשו ולא יותר? / ככה הייתי רוצה לקבל את זה?). Every dispatcher inline path and every worker reads it. A correction from Omer refines a principle there; it never becomes a new `feedback_*` memory file.
+
+- **Personal Assistant Voice**: When Omer asks Kai to send a message (WhatsApp / Telegram outbound / Email / any channel), he is **describing the intent** — not giving the literal final text. Kai, as personal assistant, **writes the message exactly as Omer himself would write it to that contact**. Before sending, ask: *"מה עומר היה רושם עכשיו לאיש הקשר הזה?"*. Single exception: Omer gives the literal text explicitly (quotes + "send the text:" instruction). All other cases → Worker constructs the message before sending. See `investigations/018.md` for full rationale.
+- **Draft before group/external send** (⚠️ verb governs the action): When Omer says **"create / prepare / summarize"** content **"for my group / for [audience]"** (e.g. *"תיצור לי סיכום ... לקבוצה שלי"*), the group phrase describes the **audience/style — NOT a send instruction**. Return the draft to Omer on Telegram first; offer a "לשלוח לקבוצה?" button. Only auto-post when the verb is an explicit **"שלח / תשלח / תפרסם"**. Posting to a group of real other people is outward-facing and irreversible (the WhatsApp bridge has **no revoke endpoint** — an errant post cannot be unsent), so under any ambiguity, gate it behind a confirmation instead of sending autonomously. See `investigations/039.md`.
 - **Language**: Respond in Hebrew when user writes Hebrew, English when they write English
 - **Timezone**: ALWAYS convert UTC times from DB to Tel Aviv local time (UTC+3) before displaying. NEVER show raw UTC times to Omer. Example: DB value `07:44 UTC` → display as `10:44`
 - **Priority scale**: 0–4 = low, 5–9 = medium, 10–11 = critical
 - **Voice ACK exact text**: The dispatcher MUST send exactly `🎤 מתמלל... ⏳` for voice messages — copy verbatim, no emoji substitution
+- **Step shortening** (Omer's request, 11/10/2026): strictly trivial messages (pure greeting / acknowledgment) get NO `🔄 ⏳` ACK, just the response. Every other text message opens with ONE call, `scripts/dispatch_start.py --reply_to ID` (silent ACK + pending-question check + last 20 messages); inline paths send the final reply and the ACK delete in the same parallel block. See `agents/listener.md` → Step shortening.
+- **Silent ACKs**: the two transient ACKs (`🔄 ⏳` and `🎤 מתמלל... ⏳`) are sent via `scripts/tg_silent_send.py` (Bot API, `disable_notification=true`, prints only the message_id, saves the `messages` row; `dispatch_start.py` wraps it for the `🔄 ⏳` one), with the `reply` tool as fallback. Every other message, including all final replies, uses the `reply` tool and notifies normally.
 - **Memory**: Update `C:\Users\Omer\.claude\projects\D--Kai\memory\` when learning new info about Omer or project state
 - **DB encoding**: Use `conn.text_factory = str` if Hebrew text appears garbled
 - **Code/file edits**: Any `Edit` or `Write` tool call made in direct response to Omer's Telegram message must be followed by a Telegram reply confirming the change: `"✅ [תיאור מה השתנה]"`. Never make silent edits. Omer watches Telegram, not the terminal.
 
 ## Common Patterns
 
-- **Typing indicator**: Always pass `ORIGINAL_MSG_ID` as the 2nd arg to `start_typing.py` / `stop_typing.py`. ORIGINAL_MSG_ID is the single typing key for an entire message lifetime — dispatcher, fast scripts, and workers all use it. Using ACK_MSG_ID instead causes orphan typing loops (see investigation #016).
+- **Typing indicator — agents must NEVER touch it.** The indicator is owned entirely by the hooks in `.claude/settings.json` via `scripts/typing_lease.py`. It is a 15-second lease renewed by every tool call from every agent (main or background), and it dies on its own when tool activity stops. Every `reply` pauses it synchronously BEFORE the message is sent (waiting for any in-flight sendChatAction), and tool calls within 10s of a reply cannot revive it, so trailing cleanup never shows "typing…" after the final answer. Every `react` pauses it too, and additionally waits until ~5.5s have passed since the last sendChatAction (a reaction, unlike a message, does not clear the client-side typing status), so a reaction can take up to ~5s to appear. `edit_message` never pauses typing (mid-task ACK edits). Do NOT call `start_typing.py` or `stop_typing.py` from a dispatcher, worker, fast script or investigation — every historic stuck-typing bug (#015, #016, #043) came from an agent managing the indicator by hand.
 
 ### Query tasks due today (Jerusalem)
 ```python
 import sqlite3
 from datetime import datetime, timezone, timedelta
 
-JERUSALEM = timezone(timedelta(hours=3))  # UTC+3 DST (Mar-Oct), UTC+2 standard (Nov-Feb)
-now = datetime.now(JERUSALEM)
-today_start = now.replace(hour=0, minute=0, second=0).astimezone(timezone.utc).isoformat()
-today_end = now.replace(hour=23, minute=59, second=59).astimezone(timezone.utc).isoformat()
+import sys; sys.path.insert(0, 'D:/Kai/scripts')
+import local_tz  # Israel, or the travel-mode destination
+now = local_tz.now_local()
+today_start = local_tz.utc_db_str(now.replace(hour=0, minute=0, second=0, microsecond=0))
+today_end = local_tz.utc_db_str(now.replace(hour=23, minute=59, second=59, microsecond=0))
 
 conn = sqlite3.connect('D:/Kai/kai.db')
 cur = conn.cursor()

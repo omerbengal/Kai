@@ -3,7 +3,7 @@
 Fast task update — update priority and/or due date of an open task.
 Usage: python fast_task_update.py --title "partial" [--priority N] [--due_at "YYYY-MM-DD HH:MM"] --ack_id N --orig_id N --chat_id ${KAI_TELEGRAM_CHAT_ID}
 
---due_at is in Jerusalem time (UTC+3). It will be converted to UTC before storage.
+--due_at is Omer's LOCAL time (Israel, or the travel-mode destination; --israel_time forces Israel). Converted to UTC before storage.
 At least one of --priority or --due_at must be provided.
 """
 import sys
@@ -11,8 +11,9 @@ from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, 'D:/Kai/scripts/fast')
 from _base import *
+import local_tz  # home timezone (travel-mode aware) - scripts/local_tz.py
 
-JERUSALEM = timezone(timedelta(hours=3))
+JERUSALEM = local_tz.home_tz()  # was fixed UTC+3; travel-mode aware
 
 
 def format_due(due_str):
@@ -36,7 +37,8 @@ def main():
     p = base_args("Update task priority or due date")
     p.add_argument("--title", required=True, help="Partial task title to match")
     p.add_argument("--priority", type=int, default=None, help="New priority (0–11)")
-    p.add_argument("--due_at", default=None, help="New due date in Jerusalem time: YYYY-MM-DD HH:MM")
+    p.add_argument("--due_at", default=None, help="New due date in LOCAL time: YYYY-MM-DD HH:MM")
+    p.add_argument("--israel_time", action="store_true", help="Interpret --due_at as Israel time even while abroad")
     args = p.parse_args()
 
     # At least one update field required
@@ -77,7 +79,7 @@ def main():
         if args.due_at is not None:
             # Parse as Jerusalem time, convert to UTC
             try:
-                dt_local = datetime.strptime(args.due_at.strip(), '%Y-%m-%d %H:%M').replace(tzinfo=JERUSALEM)
+                dt_local = datetime.strptime(args.due_at.strip(), '%Y-%m-%d %H:%M').replace(tzinfo=local_tz.israel_tz() if args.israel_time else JERUSALEM)
             except ValueError:
                 conn.close()
                 fail(args, f'פורמט תאריך שגוי: "{args.due_at}" — נדרש YYYY-MM-DD HH:MM')
@@ -87,7 +89,7 @@ def main():
             set_parts.append('due_at = ?')
             params.append(new_due_utc_str)
             old_due_display = format_due(old_due_at) if old_due_at else '—'
-            new_due_display = dt_local.strftime('%d/%m/%Y %H:%M')
+            new_due_display = local_tz.fmt_local(dt_utc, '%d/%m/%Y %H:%M', force_israel=args.israel_time)
             changes.append(f'{RLM}• תאריך יעד: {old_due_display} ← {new_due_display}')
 
         params.append(task_id)

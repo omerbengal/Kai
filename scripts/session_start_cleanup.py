@@ -22,6 +22,13 @@ for pid_file in typing_pids:
 if typing_pids:
     print(f"Cleaned up {len(typing_pids)} stale typing loop(s)")
 
+# A new session starts with no inherited indicator (investigation #043).
+for p in ("D:/Kai/tmp/typing_lease.json", "D:/Kai/tmp/typing_resume_armed.json"):
+    try:
+        os.remove(p)
+    except Exception:
+        pass
+
 # Also clean up any orphan typing_loop.py Python processes not tracked by a PID file
 # (defense in depth — catches cases where the PID file was already removed but the process kept running)
 try:
@@ -59,19 +66,15 @@ if os.path.exists(sentinel):
         except Exception:
             pass
 
-# Clean up stale cron-registered sentinel from previous session.
-# The sentinel is session-scoped: it tracks that CronCreate has been called
-# within the current session. Claude Code's cron store doesn't persist across
-# restarts (durable=true notwithstanding), so every fresh session must
-# re-register the morning briefing. Removing the sentinel here ensures the
-# STARTUP ACTIONS REQUIRED block in session_handoff_notify.py fires again.
-cron_sentinel = "D:/Kai/tmp/cron_registered_sentinel"
-try:
-    os.remove(cron_sentinel)
-except FileNotFoundError:
-    pass
-except Exception:
-    pass
+
+# Skip "קלוד עלה" for a headless child session. A batch scraper runs the
+# Claude CLI once per batch of posts to parse them, and every one of those is a
+# real session that fires SessionStart - so a single scrape produced a dozen
+# "קלוד עלה ✅" messages. The parent sets KAI_HEADLESS_CHILD before spawning;
+# nothing sets it for the interactive session, which still announces itself.
+if os.environ.get("KAI_HEADLESS_CHILD"):
+    print("[session_start_cleanup] Headless child session — skipping 'קלוד עלה' notification")
+    raise SystemExit(0)
 
 # Skip "קלוד עלה" if this startup was triggered by a PostCompact event (within last 3 minutes)
 is_post_compact = False
@@ -89,10 +92,22 @@ except Exception:
     pass
 
 if not is_post_compact:
+    # Quiet hours: the night-mode restart brings Claude up at 05:00, and this message
+    # used to arrive as a full push notification. Keep the message (a MISSING one is a
+    # useful signal that Kai failed to come up) but send it silently between 02:00-05:30
+    # Jerusalem time, so it is simply waiting in the chat by the time Omer wakes up.
+    from datetime import datetime, timezone, timedelta
+    _now = datetime.now(timezone(timedelta(hours=3)))
+    _minutes = _now.hour * 60 + _now.minute
+    quiet = 2 * 60 <= _minutes < 5 * 60 + 30
     try:
         urllib.request.urlopen(urllib.request.Request(
             f"{BASE_URL}/sendMessage",
-            json.dumps({"chat_id": CHAT_ID, "text": "קלוד עלה ✅"}).encode("utf-8"),
+            json.dumps({
+                "chat_id": CHAT_ID,
+                "text": "קלוד עלה ✅",
+                "disable_notification": quiet,
+            }).encode("utf-8"),
             {"Content-Type": "application/json"}
         ), timeout=10)
     except Exception as e:

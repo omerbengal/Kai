@@ -5,8 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python D:/Kai/scripts/patch_telegram_plugin.py",
-            "async": false
+            "command": "python D:/Kai/scripts/patch_telegram_plugin.py --session-start",
+            "async": true
           },
           {
             "type": "command",
@@ -17,6 +17,38 @@
             "type": "command",
             "command": "python D:/Kai/scripts/session_handoff_notify.py || true",
             "async": false
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "mcp__plugin_telegram_telegram__reply",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python D:/Kai/scripts/typing_session_stop.py",
+            "async": false
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__plugin_telegram_telegram__react",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python D:/Kai/scripts/typing_session_stop.py --react",
+            "async": false,
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python D:/Kai/scripts/typing_session_tick.py",
+            "async": true
           }
         ]
       }
@@ -48,12 +80,28 @@
         "hooks": [
           {
             "type": "command",
+            "command": "python D:/Kai/scripts/typing_session_start.py",
+            "async": true
+          },
+          {
+            "type": "command",
             "command": "python D:/Kai/scripts/inject_critical_rules.py",
             "async": false
           },
           {
             "type": "command",
             "command": "python D:/Kai/scripts/save_telegram_message.py --mode incoming",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python D:/Kai/scripts/typing_session_stop.py --end-turn",
             "async": true
           }
         ]

@@ -12,7 +12,14 @@ from googleapiclient.discovery import build
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
 TOKEN_PATH = "D:/Kai/credentials/google_token.json"
 CLIENT_SECRET_PATH = "D:/Kai/credentials/google_client_secret.json"
-TIMEZONE = "Asia/Jerusalem"
+TIMEZONE = "Asia/Jerusalem"  # fallback only; events use the HOME timezone (travel mode)
+
+import sys as _sys
+_sys.path.insert(0, "D:/Kai/scripts")
+try:
+    import local_tz as _ltz
+except Exception:
+    _ltz = None
 
 
 def get_calendar_service():
@@ -40,7 +47,7 @@ def get_calendar_service():
     return build("calendar", "v3", credentials=creds)
 
 
-def parse_datetime_jerusalem(dt_str):
+def parse_datetime_jerusalem(dt_str, force_israel=False):
     """
     Parse a datetime string in Jerusalem time and return an RFC3339 string.
     Input format: 'YYYY-MM-DD HH:MM' or 'YYYY-MM-DD'
@@ -58,7 +65,14 @@ def parse_datetime_jerusalem(dt_str):
             dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
         except ValueError:
             dt = datetime.strptime(dt_str, "%Y-%m-%dT%H:%M:%S")
-        # Format as RFC3339 with +03:00 (Jerusalem DST)
+        # Wall-clock time in the HOME timezone (Israel, or the travel-mode destination)
+        if _ltz is not None:
+            tz = _ltz.israel_tz() if force_israel else _ltz.home_tz()
+            tz_name = _ltz.ISRAEL_TZ_NAME if force_israel else _ltz.home_tz_name()
+            return {
+                "dateTime": dt.replace(tzinfo=tz).isoformat(timespec="seconds"),
+                "timeZone": tz_name,
+            }
         return {
             "dateTime": dt.strftime("%Y-%m-%dT%H:%M:%S") + "+03:00",
             "timeZone": TIMEZONE,
@@ -77,7 +91,7 @@ RSVP_ICONS = {
 def _parse_dt_jerusalem(dt_str):
     """Parse an RFC3339 dateTime string and return a datetime in Jerusalem tz."""
     from datetime import datetime, timezone, timedelta
-    JERUSALEM = timezone(timedelta(hours=3))
+    JERUSALEM = _ltz.home_tz() if _ltz is not None else timezone(timedelta(hours=3))
     if "+" in dt_str[10:] or dt_str.endswith("Z"):
         dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
         return dt.astimezone(JERUSALEM)

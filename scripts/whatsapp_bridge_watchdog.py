@@ -10,6 +10,8 @@ import subprocess
 import sqlite3
 from datetime import datetime, timezone
 
+import night_mode  # same directory; defines the nightly downtime window
+
 DB_PATH = r"D:\Kai\kai.db"
 LOG_FILE = r"D:\Kai\tmp\whatsapp-bridge.log"
 BAT_FILE = r"D:\Kai\start_whatsapp_bridge.bat"
@@ -72,6 +74,11 @@ def restart_bridge():
 
 
 def main():
+    # The bridge is deliberately down overnight. Restarting it here would undo the
+    # nightly shutdown within five minutes, so stand down for the duration.
+    if night_mode.should_stand_down("whatsapp_bridge_watchdog"):
+        return
+
     if is_bridge_running():
         log_to_db("check", "Bridge is up on port 8080 — OK")
     else:
