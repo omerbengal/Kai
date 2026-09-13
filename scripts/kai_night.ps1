@@ -17,9 +17,16 @@ param(
     [ValidateSet('Shutdown', 'Start')]
     [string]$Action,
 
-    # Ignores the flag file. Only for testing a half by hand.
-    [switch]$Force
+    # Ignores the flag file AND the local-time slot gate. Only for running a half by hand.
+    [switch]$Force,
+
+    # Evaluate the flag + slot gate, log the decision, and exit before touching any process.
+    [switch]$DryRun
 )
+
+# Travel mode (2026-09-13): the tasks fire every 30 minutes. Whether now is the
+# local 02:00 / 05:00 slot - and whether this half already ran tonight - is
+# decided by scripts\night_mode.py --slot, using scripts\local_tz.py.
 
 $ErrorActionPreference = 'Continue'
 
@@ -200,8 +207,29 @@ function Start-Claude {
 
 # ---------------------------------------------------------------- main
 
-if (-not $Force -and -not (Test-Path $FlagFile)) {
-    Write-Log "night mode is off (no $FlagFile), doing nothing"
+if (-not $Force) {
+    # Slot gate first: 46 of the 48 daily firings are outside the slot and must stay silent.
+    $slotArgs = @('D:\Kai\scripts\night_mode.py', '--slot', $Action)
+    if ($DryRun) { $slotArgs += '--dry-run' }
+    $gate = & $Python @slotArgs 2>&1
+    $gateExit = $LASTEXITCODE
+    if ($gateExit -ne 0) {
+        if ($gateExit -eq 3 -and "$gate" -match 'not_in_slot') {
+            if ($DryRun) { Write-Output "dry-run: $gate" }
+            exit 0
+        }
+        Write-Log "slot gate: $gate (exit $gateExit), doing nothing"
+        exit 0
+    }
+    if (-not (Test-Path $FlagFile)) {
+        Write-Log "night mode is off (no $FlagFile), doing nothing [$gate]"
+        exit 0
+    }
+    Write-Log "slot gate: $gate"
+}
+
+if ($DryRun) {
+    Write-Log "dry-run: would $Action now, exiting without touching any process"
     exit 0
 }
 

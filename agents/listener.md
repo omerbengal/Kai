@@ -349,16 +349,18 @@ python D:/Kai/scripts/fast/fast_task_create.py --title "מרכך בדים לשפ
 - **WhatsApp create group:** "תיצור קבוצה [שם] עם [שמות]" / "תפתח קבוצת WhatsApp [שם] עם [שמות]" → fast_wa_group_create.py with --name and comma-separated --participants. אופציונלי: "ותכתוב להם '[טקסט מילולי]'" → הוסף --message עם הטקסט המילולי בלבד (חריג Personal Assistant Voice — רק טקסט במרכאות מפורשות). "ותגיד להם ש[תיאור]" / "ותעדכן אותם ש[תיאור]" → ⛔ Worker, לא Option D (הניסוח צריך AI judgment בקול עומר).
 - **Travel mode (מצב חו״ל):** "מצב חו״ל [יעד] [עד DD/MM]" / "אני בחו״ל ב[יעד]" → `scripts/travel_mode.py on` (map the destination to an IANA tz, e.g. תאילנד=Asia/Bangkok; `--end` is the last day abroad, inclusive; `--weather` = city if Omer named one). "חזרתי" / "בטל מצב חו״ל" → `travel_mode.py off`. "מה השעון שלך" / "מצב חו״ל?" → `travel_mode.py status`. Reply with the script's stdout verbatim (it lists the new night/briefing times in local + Israel time).
 - ⏰ **Times are LOCAL.** While travel mode is on, every time Omer says ("מחר ב-12") is destination time - pass it as-is via `--local_at` / `--due_local` / `--due_at` / `--start` and the scripts convert. "שעון ישראל" → add `--israel_time`. Never compute UTC in your head, never assume UTC+3. Current tz: `python D:/Kai/scripts/travel_mode.py status`.
+- **Travel mode (מצב חו״ל):** "מצב חו״ל [יעד] [עד DD/MM]" / "אני בחו״ל ב[יעד]" → `scripts/travel_mode.py on` (map the destination to an IANA tz, e.g. תאילנד=Asia/Bangkok; `--end` is the last day abroad, inclusive; `--weather` = city if Omer named one). "חזרתי" / "בטל מצב חו״ל" → `travel_mode.py off`. "מה השעון שלך" / "מצב חו״ל?" → `travel_mode.py status`. Reply with the script's stdout verbatim (it lists the new night/briefing times in local + Israel time).
+- ⏰ **Times are LOCAL.** While travel mode is on, every time Omer says ("מחר ב-12") is destination time - pass it as-is via `--local_at` / `--due_local` / `--due_at` / `--start` and the scripts convert. "שעון ישראל" → add `--israel_time`. Never compute UTC in your head, never assume UTC+3. Current tz: `python D:/Kai/scripts/travel_mode.py status`.
 - Create reminder: "תזכיר לי [מה] [מתי]" (exact time extractable)
 - List reminders: "מה התזכורות שלי" / "תראה תזכורות" / "תראה לי תזכורות"
 - List tasks: "מה המשימות שלי" / "תראה לי משימות ל[היום/תחום]"
 - Create task: "תוסיף משימה [כותרת]" / "משימה חדשה [כותרת]" — `--priority` ו-`--due_at` הם **אופציונליים**. ברירות מחדל: עדיפות=5, ללא דדליין. כותרת נקייה ותחום ניתן להסיק (work/personal וכו') = Option D. תעדוף/דדליין מצוינים = העבר אותם; לא מצוינים = השמט את הדגלים והסקריפט יחיל ברירות מחדל.
-- Mark task done: "סמן משימה [כותרת] כהושלמה" / "השלמתי [כותרת]" (optional: "אתמול ב-X" / "ב-[תאריך שעה]" → add --completed_at "YYYY-MM-DD HH:MM" in Jerusalem time)
+- Mark task done: "סמן משימה [כותרת] כהושלמה" / "השלמתי [כותרת]" (optional: "אתמול ב-X" / "ב-[תאריך שעה]" → add --completed_at "YYYY-MM-DD HH:MM" in LOCAL time)
 - Update task: "עדכן משימה [כותרת] עדיפות [N]" / "שנה תאריך יעד של [כותרת] ל-[תאריך]"
 - Delete task permanently: "מחק משימה [כותרת]" / "תמחק משימה [כותרת]" / "מחק את המשימה [כותרת]" (optional `--domain [תחום]` when Omer specifies "בתחום עבודה/אישי/וכו'")
 - Cancel reminder (soft, dismissed): "בטל תזכורת [נושא]" / "תבטל תזכורת [נושא]"
 - Delete reminder permanently: "מחק תזכורת [נושא] לגמרי" / "תמחק לגמרי תזכורת [נושא]" / "תמחק תזכורת [נושא]" (when Omer explicitly says "לגמרי" or "מחק" rather than "בטל")
-- Update reminder: "דחה תזכורת [נושא] ל-[תאריך שעה]" / "תזיז תזכורת [נושא] למחר ב-[שעה]" (time change → --trigger_at in UTC) | "שנה שם תזכורת [ישן] ל-[חדש]" / "עדכן תזכורת [נושא] ל-[שם חדש]" (text change → --new_message) | ניתן לשנות גם וגם באותו פקודה
+- Update reminder: "דחה תזכורת [נושא] ל-[תאריך שעה]" / "תזיז תזכורת [נושא] למחר ב-[שעה]" (time change → --local_at in LOCAL time) | "שנה שם תזכורת [ישן] ל-[חדש]" / "עדכן תזכורת [נושא] ל-[שם חדש]" (text change → --new_message) | ניתן לשנות גם וגם באותו פקודה
 - Look up contact: "מה הפרטים של [שם]" → --fields all | "מה הטלפון של [שם]" → --fields phone | "מה האימייל של [שם]" → --fields email | "מה הטלפון והאימייל של [שם]" → --fields phone,email | "מה הכינויים של [שם]" → --fields nicknames
 - Add contact: "תוסיף איש קשר [שם] טלפון [N]" / "תוסיף לאנשי הקשר [שם]"
 - WhatsApp history: "תראה לי N הודעות אחרונות עם [שם]" / "מה כתבנו עם [שם]"
@@ -427,7 +429,7 @@ python D:/Kai/scripts/fast/fast_reminder_create.py --message "[מה]" --local_at
 # Create task (--priority default 5; --domain optional fuzzy match; --due_local optional LOCAL "YYYY-MM-DD HH:MM")
 python D:/Kai/scripts/fast/fast_task_create.py --title "[כותרת]" --priority 5 --domain "work" --ack_id ACK_MSG_ID --orig_id ORIGINAL_MSG_ID --chat_id ${KAI_TELEGRAM_CHAT_ID} &
 
-# Mark task done (--completed_at optional: "YYYY-MM-DD HH:MM" in Jerusalem time, e.g. "2026-04-15 21:00")
+# Mark task done (--completed_at optional: "YYYY-MM-DD HH:MM" in LOCAL time, e.g. "2026-04-15 21:00"; --israel_time to force Israel)
 python D:/Kai/scripts/fast/fast_task_done.py --title "[partial title]" --completed_at "YYYY-MM-DD HH:MM" --ack_id ACK_MSG_ID --orig_id ORIGINAL_MSG_ID --chat_id ${KAI_TELEGRAM_CHAT_ID} &
 
 # Update task priority and/or due date (at least one of --priority / --due_at required)

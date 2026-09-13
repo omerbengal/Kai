@@ -14,7 +14,23 @@ from datetime import datetime, timezone, timedelta
 DB_PATH = r"D:\Kai\kai.db"
 BOT_TOKEN = os.environ["KAI_TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ.get("KAI_TELEGRAM_CHAT_ID", "")
-JERUSALEM_TZ = timezone(timedelta(hours=3))  # UTC+3 (Israel DST)
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    import local_tz  # home timezone: Israel, or the destination while travel mode is on
+except Exception:  # never let the tz helper stop reminders from firing
+    local_tz = None
+JERUSALEM_TZ = timezone(timedelta(hours=3))  # legacy fallback only - use local_now()
+
+
+def local_now():
+    if local_tz is not None:
+        try:
+            return local_tz.now_local()
+        except Exception:
+            pass
+    return datetime.now(JERUSALEM_TZ)
 
 
 def send_telegram(text: str, conn=None):
@@ -71,10 +87,17 @@ def advance_recurring(cur, rid, recurrence, series_at):
 
 
 def run_heartbeat():
-    now_jerusalem = datetime.now(JERUSALEM_TZ)
+    # Travel mode auto-return after the end date (sends its own Telegram message once).
+    try:
+        import travel_mode
+        travel_mode.expire_check()
+    except Exception:
+        pass
+
+    now_jerusalem = local_now()  # name kept; this is LOCAL time (see local_tz.py)
     hour = now_jerusalem.hour
 
-    # Sleep window: 01:00-05:59 only run on the hour
+    # Sleep window: 01:00-05:59 local, only run on the hour
     if 1 <= hour <= 5 and now_jerusalem.minute != 0:
         return  # Silent exit
 

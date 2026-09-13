@@ -97,7 +97,13 @@ if not is_post_compact:
     # useful signal that Kai failed to come up) but send it silently between 02:00-05:30
     # Jerusalem time, so it is simply waiting in the chat by the time Omer wakes up.
     from datetime import datetime, timezone, timedelta
-    _now = datetime.now(timezone(timedelta(hours=3)))
+    try:
+        import sys as _sys
+        _sys.path.insert(0, "D:/Kai/scripts")
+        import local_tz
+        _now = local_tz.now_local()  # local time: follows travel mode
+    except Exception:
+        _now = datetime.now(timezone(timedelta(hours=3)))
     _minutes = _now.hour * 60 + _now.minute
     quiet = 2 * 60 <= _minutes < 5 * 60 + 30
     try:

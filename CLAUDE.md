@@ -34,7 +34,7 @@ SQLite. Always use Python's `sqlite3` module to query. Key tables:
 - **task_notifications** — deduplication log to prevent repeat alerts
 - **action_log** — audit trail of agent runs
 
-All times stored in UTC. Israel timezone (Tel Aviv/Jerusalem) = UTC+3 during DST (March–October, currently active) or UTC+2 standard (November–February).
+All times stored in UTC. Omer's **local** timezone is NOT always Israel: travel mode ("מצב חו״ל", `config/travel_mode.json`) switches it to the destination. Always convert through `scripts/local_tz.py` (`now_local()`, `local_str_to_utc_str()`, `fmt_local()`, `tz_label()`); never assume UTC+3. The SessionStart hook prints the active timezone. See `docs/travel_mode_design.md`.
 
 ### Example queries
 ```python
@@ -98,7 +98,7 @@ See `agents/listener.md` Step 2 for the exact query.
 1. `start_claude.bat` launches Claude Code
 2. `SessionStart` hook: patches Telegram plugin, sends "קלוד עלה ✅" to Telegram, runs `session_start_cleanup.py`, injects session context
 3. **No cron registration is needed at startup.** Both scheduled jobs run from Windows Task Scheduler, independently of any Claude session:
-   - **Morning briefing** — `KaiMorningBriefing` task → `scripts/run_morning_briefing.py`, daily at 09:00 sharp. It builds and sends the briefing itself and logs `briefing_sent` to `action_log`.
+   - **Morning briefing** — `KaiMorningBriefing` task → `scripts/run_morning_briefing.py`, fires every 30 min and sends only at LOCAL 09:xx (Israel, or the travel-mode destination), once per local date. It builds and sends the briefing itself and logs `briefing_sent` to `action_log`. Manual run: add `--force`; test the gate with `--dry-run [--now ISO_UTC]`.
    - **Heartbeat** — `KaiHeartbeat` task → `scripts/heartbeat.py`
 
    Do NOT call `CronCreate` for either one. A Claude-side cron would duplicate the task and fire late (the scheduler adds up to 10% jitter). See `agents/morning_briefing_launcher.md` — it is retained only for manual/on-demand briefing runs.
@@ -127,7 +127,7 @@ Consistency in update behavior matters more than saving 2–3 seconds.
 - **Personal Assistant Voice**: When Omer asks Kai to send a message (WhatsApp / Telegram outbound / Email / any channel), he is **describing the intent** — not giving the literal final text. Kai, as personal assistant, **writes the message exactly as Omer himself would write it to that contact**. Before sending, ask: *"מה עומר היה רושם עכשיו לאיש הקשר הזה?"*. Single exception: Omer gives the literal text explicitly (quotes + "send the text:" instruction). All other cases → Worker constructs the message before sending. See `investigations/018.md` for full rationale.
 - **Draft before group/external send** (⚠️ verb governs the action): When Omer says **"create / prepare / summarize"** content **"for my group / for [audience]"** (e.g. *"תיצור לי סיכום ... לקבוצה שלי"*), the group phrase describes the **audience/style — NOT a send instruction**. Return the draft to Omer on Telegram first; offer a "לשלוח לקבוצה?" button. Only auto-post when the verb is an explicit **"שלח / תשלח / תפרסם"**. Posting to a group of real other people is outward-facing and irreversible (the WhatsApp bridge has **no revoke endpoint** — an errant post cannot be unsent), so under any ambiguity, gate it behind a confirmation instead of sending autonomously. See `investigations/039.md`.
 - **Language**: Respond in Hebrew when user writes Hebrew, English when they write English
-- **Timezone**: ALWAYS convert UTC times from DB to Tel Aviv local time (UTC+3) before displaying. NEVER show raw UTC times to Omer. Example: DB value `07:44 UTC` → display as `10:44`
+- **Timezone**: ALWAYS convert UTC times from DB to Omer's LOCAL time via `scripts/local_tz.py` before displaying - Israel at home, the destination while travel mode is on (then label it: `12:00 (תאילנד)`). Times Omer says are local unless he says "שעון ישראל". NEVER show raw UTC, never hard-code UTC+3.
 - **Priority scale**: 0–4 = low, 5–9 = medium, 10–11 = critical
 - **Voice ACK exact text**: The dispatcher MUST send exactly `🎤 מתמלל... ⏳` for voice messages — copy verbatim, no emoji substitution
 - **Step shortening** (Omer's request, 11/10/2026): strictly trivial messages (pure greeting / acknowledgment) get NO `🔄 ⏳` ACK, just the response. Every other text message opens with ONE call, `scripts/dispatch_start.py --reply_to ID` (silent ACK + pending-question check + last 20 messages); inline paths send the final reply and the ACK delete in the same parallel block. See `agents/listener.md` → Step shortening.

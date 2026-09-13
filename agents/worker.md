@@ -152,7 +152,7 @@ text = RLM + "\n".join(lines)
 ## System Context
 
 - **DB**: `D:/Kai/kai.db` — use `conn.text_factory = str` for Hebrew text
-- **Timezone**: UTC+3 (DST, March–October). NEVER show raw UTC to Omer. Always add 3 hours before displaying times.
+- **Timezone**: Omer's LOCAL time = Israel at home, the destination while travel mode ("מצב חו״ל") is on. Use `scripts/local_tz.py` for every conversion (`now_local()`, `local_str_to_utc_str("YYYY-MM-DD HH:MM", force_israel=False)`, `fmt_local(utc)` -> `"12:00 (תאילנד)"` abroad). Times Omer says are local unless he says "שעון ישראל". NEVER show raw UTC, NEVER assume UTC+3. Check: `python D:/Kai/scripts/travel_mode.py status`.
 - **Language**: reply in Hebrew if Omer wrote Hebrew, English if Omer wrote English
 - **Priority scale**: 0–4 = low, 5–9 = medium, 10–11 = critical
 - **Memory**: `C:\Users\Omer\.claude\projects\D--Kai\memory\`
@@ -209,6 +209,8 @@ conn = sqlite3.connect('D:/Kai/kai.db')
 conn.text_factory = str
 conn.execute(
     "INSERT INTO reminders (message, trigger_at, recurrence, status) VALUES (?, ?, ?, 'pending')",
+    # UTC from Omer's LOCAL time: import sys; sys.path.insert(0,'D:/Kai/scripts'); import local_tz
+    # local_tz.local_str_to_utc_str('2026-09-14 12:00')  (force_israel=True for "שעון ישראל")
     # UTC from Omer's LOCAL time: import sys; sys.path.insert(0,'D:/Kai/scripts'); import local_tz
     # local_tz.local_str_to_utc_str('2026-09-14 12:00')  (force_israel=True for "שעון ישראל")
     ('<message>', '<YYYY-MM-DD HH:MM:SS UTC>', None)  # recurrence: 'daily'|'weekly'|'monthly'|'yearly'|None
