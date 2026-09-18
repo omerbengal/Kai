@@ -464,6 +464,26 @@ def _fetch_high_pri_upcoming() -> list[dict]:
 
 # --- Step 8: Birthdays (people + B-Days calendar) ---------------------------
 
+def _days_until_birthday(bday: str, today: date) -> int | None:
+    """Whole days from LOCAL `today` to the next occurrence of birthday MM-DD.
+
+    Pure date-vs-date arithmetic (never date-vs-datetime, never UTC 'now'):
+    0 = today, and a birthday already past this year rolls to next year.
+    """
+    try:
+        month, day = int(bday[5:7]), int(bday[8:10])
+    except (ValueError, IndexError):
+        return None
+    for year in (today.year, today.year + 1):
+        try:
+            nxt = date(year, month, day)
+        except ValueError:  # 29/02 on a non-leap year -> 01/03
+            nxt = date(year, 3, 1)
+        if nxt >= today:
+            return (nxt - today).days
+    return None
+
+
 def _fetch_people_birthdays() -> list[dict]:
     conn = sqlite3.connect(DB_PATH)
     conn.text_factory = str
@@ -521,7 +541,13 @@ def _fetch_bdays_calendar() -> list[dict]:
             d = datetime.strptime(d_str, "%Y-%m-%d").date()
         except ValueError:
             continue
-        out.append({"name": name, "date": d_str, "days_until": (d - today).days})
+        days = (d - today).days
+        # Google can return yesterday's all-day event when the calendar's own
+        # timezone is ahead/behind the local one (travel mode). A birthday that
+        # already passed is not upcoming - drop it instead of showing "-1 ימים".
+        if days < 0:
+            continue
+        out.append({"name": name, "date": d_str, "days_until": days})
     return out
 
 
@@ -547,7 +573,8 @@ def _merge_birthdays(people: list[dict], bdays: list[dict]) -> list[dict]:
             continue
         merged.append({"name": b["name"], "days_until": b["days_until"], "source": "calendar"})
     merged.sort(key=lambda x: x["days_until"])
-    return [m for m in merged if m["days_until"] <= 14]
+    # Safety net: only upcoming birthdays (0 = today), never a negative count.
+    return [m for m in merged if 0 <= m["days_until"] <= 14]
 
 
 # --- Step 9: Gmail unread by category ----------------------------------------
