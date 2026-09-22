@@ -52,7 +52,7 @@ python D:/Kai/scripts/tg_pin.py pin {ACK_MSG_ID}   # ONLY at a worker-spawn poin
 >
 > **Typing is never yours to manage** — no path calls `start_typing.py` or `stop_typing.py` (investigation #043).
 
-> **Voice messages** already have ACK_MSG_ID set from Step 1 — skip this step entirely.
+> **Voice messages** already have ACK_MSG_ID set from Step 1 — skip sub-step 1 (the ACK send) only. **Sub-step 2 (the pin) still applies** and is performed in Step 1 right after the transcription ACK is sent. Never leave a voice ACK unpinned.
 
 **What to do with this ACK later:**
 - **Trivial (Option A/B):** No ACK was sent (step shortening, 11/10/2026) — just respond.
