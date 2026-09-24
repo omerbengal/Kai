@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0f1115">
+<title>קאי - שיחה קולית</title>
+<style>
+  :root { --bg:#0f1115; --card:#181b22; --fg:#e8eaf0; --dim:#8a90a0; --acc:#3b82f6; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 -apple-system, "Segoe UI", Arial, sans-serif;
+         min-height:100dvh; display:flex; flex-direction:column; padding:env(safe-area-inset-top) 16px env(safe-area-inset-bottom); }
+  header { display:flex; justify-content:space-between; align-items:center; padding:14px 0; }
+  h1 { font-size:20px; margin:0; }
+  #status { font-size:13px; padding:4px 10px; border-radius:999px; background:var(--card); color:var(--dim); }
+  #status.live { color:var(--ok); } #status.busy { color:var(--warn); } #status.err { color:var(--err); }
+  #log { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding:8px 0 16px; }
+  .msg { max-width:88%; padding:8px 12px; border-radius:14px; background:var(--card); white-space:pre-wrap; word-break:break-word; }
+  .me { align-self:flex-start; background:#1e3a8a; }
+  .kai { align-self:flex-end; }
+  .sys { align-self:center; font-size:12px; color:var(--dim); background:transparent; padding:2px; }
+  footer { display:flex; flex-direction:column; align-items:center; gap:8px; padding:12px 0 20px; }
+  #mic { width:112px; height:112px; border-radius:50%; border:0; background:var(--acc); color:#fff; font-size:44px;
+         box-shadow:0 6px 24px rgba(59,130,246,.4); transition:transform .1s, background .2s; -webkit-tap-highlight-color:transparent; }
+  #mic:active { transform:scale(.95); }
+  #mic.on { background:var(--err); box-shadow:0 0 0 0 rgba(239,68,68,.6); animation:pulse 1.6s infinite; }
+  @keyframes pulse { 70% { box-shadow:0 0 0 22px rgba(239,68,68,0); } 100% { box-shadow:0 0 0 0 rgba(239,68,68,0); } }
+  #hint { font-size:13px; color:var(--dim); text-align:center; }
+</style>
+</head>
+<body>
+<header><h1>קאי 🎙️</h1><span id="status">מנותק</span></header>
+<div id="log"></div>
+<footer>
+  <button id="mic" aria-label="התחל או סיים שיחה">🎤</button>
+  <div id="hint">לחץ כדי להתחיל לדבר</div>
+</footer>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const logEl = $("log"), statusEl = $("status"), micBtn = $("mic"), hintEl = $("hint");
+
+let ws = null, ctx = null, micStream = null, micNode = null, srcNode = null;
+let active = false, resumeHandle = null, reconnecting = false;
+let playHead = 0; const playing = new Set();
+let curMe = null, curKai = null;
+
+function setStatus(text, cls = "") { statusEl.textContent = text; statusEl.className = cls; }
+function addMsg(cls, text) { const d = document.createElement("div"); d.className = "msg " + cls; d.textContent = text;
+  logEl.appendChild(d); logEl.scrollTop = logEl.scrollHeight; return d; }
+function sys(text) { addMsg("sys", text); }
+
+// ---------------------------------------------------------------- audio in (mic -> 16 kHz PCM16)
+const WORKLET = `
+class Down extends AudioWorkletProcessor {
+  constructor() { super(); this.ratio = sampleRate / 16000; this.acc = []; this.pos = 0; }
+  process(inputs) {
+    const ch = inputs[0][0]; if (!ch) return true;
+    for (; this.pos < ch.length; this.pos += this.ratio) this.acc.push(ch[Math.floor(this.pos)]);
+    this.pos -= ch.length;
+    if (this.acc.length >= 640) {            // 40 ms at 16 kHz
+      const pcm = new Int16Array(this.acc.length);
+      for (let i = 0; i < this.acc.length; i++) { const s = Math.max(-1, Math.min(1, this.acc[i])); pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff; }
+      this.port.postMessage(pcm.buffer, [pcm.buffer]); this.acc = [];
+    }
+    return true;
+  }
+}
+registerProcessor("down", Down);`;
+
+function b64(buf) { let s = ""; const b = new Uint8Array(buf); for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(s); }
+function unb64(str) { const s = atob(str); const b = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i); return b.buffer; }
+
+async function startAudio() {
+  ctx = new (window.AudioContext || window.webkitAudioContext)();
+  await ctx.resume();
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+  const url = URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" }));
+  await ctx.audioWorklet.addModule(url);
+  srcNode = ctx.createMediaStreamSource(micStream);
+  micNode = new AudioWorkletNode(ctx, "down");
+  micNode.port.onmessage = (e) => {
+    if (ws && ws.readyState === 1 && ws.ready)
+      ws.send(JSON.stringify({ realtimeInput: { audio: { data: b64(e.data), mimeType: "audio/pcm;rate=16000" } } }));
+  };
+  srcNode.connect(micNode);
+}
+function stopAudio() {
+  try { srcNode && srcNode.disconnect(); micNode && micNode.disconnect(); } catch (e) {}
+  if (micStream) micStream.getTracks().forEach(t => t.stop());
+  flushPlayback(); if (ctx) ctx.close();
+  ctx = micStream = micNode = srcNode = null;
+}
+
+// ---------------------------------------------------------------- audio out (24 kHz PCM16)
+function playPcm(buf) {
+  const pcm = new Int16Array(buf), f = new Float32Array(pcm.length);
+  for (let i = 0; i < pcm.length; i++) f[i] = pcm[i] / 32768;
+  const ab = ctx.createBuffer(1, f.length, 24000); ab.copyToChannel(f, 0);
+  const s = ctx.createBufferSource(); s.buffer = ab; s.connect(ctx.destination);
+  playHead = Math.max(playHead, ctx.currentTime + 0.02); s.start(playHead); playHead += ab.duration;
+  playing.add(s); s.onended = () => playing.delete(s);
+}
+function flushPlayback() { playing.forEach(s => { try { s.stop(); } catch (e) {} }); playing.clear(); playHead = 0; }
+
+// ---------------------------------------------------------------- Gemini Live session
+async function connect() {
+  setStatus("מתחבר...", "busy");
+  const t0 = performance.now();
+  const r = await fetch("/api/session" + (resumeHandle ? "?resume=" + encodeURIComponent(resumeHandle) : ""), { credentials: "same-origin" });
+  const s = await r.json();
+  if (!s.ok) throw new Error(s.error === "no_gemini_key" ? "אין עדיין מפתח Gemini בשרת" : (s.error + ": " + (s.detail || "")));
+  return new Promise((resolve, reject) => {
+    ws = new WebSocket(s.ws_url); ws.ready = false;
+    ws.onopen = () => ws.send(JSON.stringify(s.setup));
+    ws.onerror = () => reject(new Error("WebSocket error"));
+    ws.onclose = (e) => onClose(e);
+    ws.onmessage = async (ev) => {
+      const msg = JSON.parse(typeof ev.data === "string" ? ev.data : await ev.data.text());
+      if (msg.setupComplete) { ws.ready = true; setStatus("🟢 מחובר - דבר", "live");
+        sys(`מחובר (${s.model}) תוך ${Math.round(performance.now() - t0)}ms`); resolve(); return; }
+      handle(msg);
+    };
+  });
+}
+
+function handle(msg) {
+  const sc = msg.serverContent;
+  if (sc) {
+    if (sc.interrupted) flushPlayback();
+    if (sc.inputTranscription && sc.inputTranscription.text) {
+      if (!curMe) curMe = addMsg("me", ""); curMe.textContent += sc.inputTranscription.text; }
+    if (sc.outputTranscription && sc.outputTranscription.text) {
+      curMe = null; if (!curKai) curKai = addMsg("kai", ""); curKai.textContent += sc.outputTranscription.text; }
+    for (const p of (sc.modelTurn && sc.modelTurn.parts) || [])
+      if (p.inlineData && p.inlineData.data) playPcm(unb64(p.inlineData.data));
+    if (sc.turnComplete) { curKai = null; curMe = null; }
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  if (msg.toolCall) for (const fc of msg.toolCall.functionCalls || []) runTool(fc);
+  if (msg.sessionResumptionUpdate && msg.sessionResumptionUpdate.resumable && msg.sessionResumptionUpdate.newHandle)
+    resumeHandle = msg.sessionResumptionUpdate.newHandle;
+  if (msg.goAway) { sys("השיחה מתחדשת..."); reconnect(); }
+}
+
+function sendToolResponse(fc, response) {
+  if (ws && ws.readyState === 1)
+    ws.send(JSON.stringify({ toolResponse: { functionResponses: [{ id: fc.id, name: fc.name, response }] } }));
+}
+
+async function runTool(fc) {
+  const t0 = performance.now();
+  if (fc.name === "delegate_to_kai") {
+    sys("🧠 קאי בודק ברקע: " + (fc.args && fc.args.task || ""));
+    try {
+      const r = await fetch("/api/delegate", { method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(fc.args || {}) });
+      const res = await r.json();
+      sys(`🧠 תשובה מקאי (${res.seconds}s)${res.telegram_sent ? " - נשלחה גם לטלגרם" : ""}`);
+      sendToolResponse(fc, { result: res.result, ok: res.ok, scheduling: "WHEN_IDLE" });
+    } catch (e) { sendToolResponse(fc, { ok: false, result: "delegate failed: " + e, scheduling: "WHEN_IDLE" }); }
+    return;
+  }
+  try {
+    const r = await fetch("/api/tool/" + fc.name, { method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(fc.args || {}) });
+    const res = await r.json();
+    sys(`🔧 ${fc.name} - ${Math.round(performance.now() - t0)}ms (שרת ${r.headers.get("X-Tool-Ms")}ms)`);
+    sendToolResponse(fc, res);
+  } catch (e) { sendToolResponse(fc, { ok: false, error: String(e) }); }
+}
+
+async function reconnect() {
+  if (reconnecting || !active) return; reconnecting = true;
+  try { const old = ws; ws = null; if (old) { old.onclose = null; old.close(); } await connect(); }
+  catch (e) { sys("❌ " + e.message); stop(); }
+  finally { reconnecting = false; }
+}
+
+function onClose(e) {
+  if (!active) return;
+  if (e && e.reason) sys("החיבור נסגר: " + e.reason);
+  if (resumeHandle) reconnect(); else { setStatus("נותק", "err"); stop(); }
+}
+
+async function start() {
+  active = true; micBtn.classList.add("on"); micBtn.textContent = "⏹"; hintEl.textContent = "לחץ כדי לסיים";
+  try { await startAudio(); await connect(); }
+  catch (e) { sys("❌ " + e.message); setStatus("שגיאה", "err"); stop(false); }
+}
+function stop(resetStatus = true) {
+  active = false; resumeHandle = null;
+  if (ws) { ws.onclose = null; try { ws.close(); } catch (e) {} ws = null; }
+  stopAudio();
+  micBtn.classList.remove("on"); micBtn.textContent = "🎤"; hintEl.textContent = "לחץ כדי להתחיל לדבר";
+  if (resetStatus) setStatus("מנותק");
+}
+micBtn.onclick = () => active ? stop() : start();
+
+fetch("/api/health").then(r => r.json()).then(h => { if (!h.gemini_key) sys("⚠️ אין עדיין מפתח Gemini בשרת"); });
+</script>
+</body>
+</html>
