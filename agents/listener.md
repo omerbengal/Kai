@@ -865,3 +865,12 @@ Drafts from the live voice conversation (`voice/server.py`): the voice delegate 
 - Reply with the script's single stdout line, `reply_to=ORIGINAL_MSG_ID`. Exit 1 means failed or already handled; the line already says which.
 - Never retry a send by hand: the script deletes the draft only on success, so a second tap cannot send twice.
 
+### Voice Send Callbacks (dispatcher handles INLINE — no worker)
+
+Drafts from the live voice conversation (`voice/server.py`): the voice delegate never sends to other people itself, it posts the draft with ✅/❌ buttons.
+
+**When `callback_data` starts with `voice_send_` or `voice_cancel_`:**
+- Extract `<id>` and run `python D:/Kai/scripts/voice_send_proposal.py send <id>` (or `cancel <id>`)
+- Reply with the script's single stdout line, `reply_to=ORIGINAL_MSG_ID`. Exit 1 means failed or already handled; the line already says which.
+- Never retry a send by hand: the script deletes the draft only on success, so a second tap cannot send twice.
+

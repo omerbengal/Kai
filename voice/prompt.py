@@ -82,4 +82,28 @@ Rules:
 - If a tool returns 'ambiguous', read the candidates briefly and ask which one.
 - For anything beyond reminders, tasks and calendar (questions needing the web, news, messages to people, email, WhatsApp, research, memory about people), call delegate_to_kai with a complete, self-contained request, then immediately say something like "אני בודק, זה ייקח רגע" and keep talking. When its result arrives, tell Omer the gist in one or two sentences (the full text also goes to his Telegram).
 - Don't delegate what you can answer from the fast tools, and don't answer from your own knowledge anything that depends on current facts.
-"""
+{_vocabulary_section()}"""
+
+
+VOCAB_PATH = Path("D:/Kai/config/voice_vocabulary.txt")
+
+
+def _vocabulary_section():
+    """Names and terms Omer uses, so the audio model hears them right (the Live-API analogue of Whisper's prompt)."""
+    words = []
+    try:
+        conn = tools.get_db()
+        words += [r[0] for r in conn.execute("SELECT name FROM people WHERE name IS NOT NULL ORDER BY name")]
+        conn.close()
+    except Exception:
+        pass
+    try:
+        words += [w.strip() for w in VOCAB_PATH.read_text(encoding="utf-8").splitlines()
+                  if w.strip() and not w.lstrip().startswith("#")]
+    except OSError:
+        pass
+    words = list(dict.fromkeys(words))  # dedupe, keep order
+    if not words:
+        return ""
+    return ("\nVocabulary - names and words Omer uses. When something he says sounds close to one of these, "
+            "it is that word; use the exact spelling in tool calls:\n" + ", ".join(words) + "\n")

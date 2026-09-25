@@ -182,9 +182,22 @@ DELEGATE_SYSTEM = (
     "ignore the Telegram dispatcher protocol, do not spawn workers, do not send Telegram messages or ACKs yourself, "
     "and never touch typing scripts. Do the task directly and fast. Your final answer is read aloud by a voice agent "
     "and also sent to Omer on Telegram, so reply in Hebrew, concise (max ~6 short lines), no markdown tables, "
-    "times in Omer's local time. Destructive or outward actions (sending messages to other people, deleting) "
-    "are allowed only if the request states them explicitly; otherwise describe what you would do and stop."
+    "times in Omer's local time. NEVER send anything to another person yourself (WhatsApp, email, groups): "
+    "voice transcription can mishear names and words, so every outward send needs Omer's tap on Telegram. "
+    "If the request asks to send a message, look up the recipient, write the message the way Omer would write it, "
+    "and end your answer with ONE line exactly like: "
+    'SEND_PROPOSAL: {"channel": "whatsapp", "to": "<contact name or JID>", "text": "<the message>"} '
+    '(channel is whatsapp or email; for email add "subject"). The server turns it into approve/cancel buttons. '
+    "Deleting data is also off-limits here: describe what you would delete and stop."
 )
+
+# Backstop for the SEND_PROPOSAL rule: deny every known outward-send route. Not airtight (a hand-written
+# script could still reach the bridge), so the prompt rule above is the primary control.
+OUTWARD_DENY = [
+    "Bash(*fast_whatsapp*)", "Bash(*fast_wa_broadcast*)", "Bash(*fast_wa_group*)", "Bash(*fast_email*)",
+    "Bash(*localhost:8080*)", "Bash(*127.0.0.1:8080*)", "Bash(*gws*gmail*)", "Bash(*google_auth_gmail*)",
+]
+PENDING_SENDS = Path("D:/Kai/tmp/voice_pending_sends")
 
 # Headless flags: user settings only (no project hooks -> no SessionStart Telegram ping, no typing lease,
 # no plugin patching); Telegram plugin disabled so a second bot poller never fights the live channel.
@@ -194,6 +207,7 @@ CLAUDE_ARGS = [
     "--setting-sources", "user",
     "--settings", json.dumps({"enabledPlugins": {"telegram@claude-plugins-official": False}}),
     "--strict-mcp-config",
+    "--disallowedTools", *OUTWARD_DENY,
     "--append-system-prompt", DELEGATE_SYSTEM,
 ]
 
@@ -215,8 +229,34 @@ def _run_claude(task, timeout):
         return False, (p.stdout or p.stderr or "claude failed")[-800:], secs
 
 
-def _telegram(text):
-    body = json.dumps({"chat_id": CHAT_ID, "text": text[:4000]}, ensure_ascii=False).encode("utf-8")
+def _split_proposal(text):
+    """Pull a 'SEND_PROPOSAL: {json}' line out of the delegate's answer -> (answer, proposal or None)."""
+    lines = text.splitlines()
+    for i in range(len(lines) - 1, -1, -1):
+        if lines[i].strip().startswith("SEND_PROPOSAL:"):
+            try:
+                prop = json.loads(lines[i].split(":", 1)[1].strip())
+            except ValueError:
+                return text, None
+            if isinstance(prop, dict) and prop.get("to") and prop.get("text"):
+                return "\n".join(lines[:i] + lines[i + 1:]).strip(), prop
+    return text, None
+
+
+def _save_proposal(prop, task):
+    PENDING_SENDS.mkdir(parents=True, exist_ok=True)
+    pid = secrets.token_hex(4)
+    (PENDING_SENDS / f"{pid}.json").write_text(json.dumps(
+        {**prop, "task": task, "created_utc": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False),
+        encoding="utf-8")
+    return pid
+
+
+def _telegram(text, keyboard=None):
+    payload = {"chat_id": CHAT_ID, "text": text[:4000]}
+    if keyboard:
+        payload["reply_markup"] = {"inline_keyboard": keyboard}
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data=body,
                                  headers={"Content-Type": "application/json; charset=utf-8"})
     try:
