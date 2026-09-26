@@ -64,7 +64,7 @@ def transcribe(audio_path: str) -> str:
             "-F", f"file=@{audio_path};type=audio/ogg;filename=audio.ogg",
             "-F", "model=whisper-large-v3",
             "-F", "language=he",
-            "-F", f"prompt={INITIAL_PROMPT}",
+            "-F", f"prompt={build_prompt()}",
         ],
         capture_output=True,
         timeout=60,
@@ -72,7 +72,7 @@ def transcribe(audio_path: str) -> str:
     data = json.loads(result.stdout.decode("utf-8"))
     if "error" in data:
         raise RuntimeError(data["error"]["message"])
-    return data["text"].strip()
+    return apply_corrections(data["text"].strip())
 
 
 def tg_edit(chat_id: str, msg_id: str, text: str):

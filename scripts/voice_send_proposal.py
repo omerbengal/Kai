@@ -42,6 +42,9 @@ def send_email(to, subject, body):
 
 
 def main():
+    # The Windows console defaults to cp1255, which cannot encode the status emoji; without this the
+    # success line crashed AFTER the send and returned exit 1 (26/09).
+    sys.stdout.reconfigure(encoding="utf-8")
     if len(sys.argv) != 3 or sys.argv[1] not in ("send", "cancel"):
         print(__doc__)
         return 1
