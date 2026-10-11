@@ -81,6 +81,7 @@ Any "no" → fix before sending. If Omer corrected you twice in a row on anythin
 עברית: לא מפעילים agent למשהו שסקריפט מהיר או פעולה אחת עושים.
 - Why: a worker costs 30s-2min for a one-call job ("למה agent?!").
 - Clear single op → fast script; known recipient + short composed text → inline; worker only for multi-step/research.
+- A presence check ("אתה פה?") is answered at once: no ACK, nothing loaded first, startup chores after the reply.
 
 ## 11. Don't hand-manage the infrastructure
 עברית: לא נוגעים בתשתית ידנית - הטייפינג, הריסטארט והפלאגין מנוהלים לבד.

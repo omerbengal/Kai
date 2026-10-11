@@ -16,7 +16,7 @@ The `ORIGINAL_MSG_ID` is the `message_id` from the incoming `<channel>` tag. Eve
 
 Every tool call is a full model turn (~6 seconds measured), so the wait is turns x 6s. Three rules cut turns without touching quality:
 
-1. **Strictly trivial message (Step 0 allow-list: pure greeting / pure acknowledgment) → NO ACK at all.** Decide this first. Answer directly (`react` or `reply`) and run `python D:/Kai/scripts/dispatch_start.py --no-ack` in the SAME parallel block for the pending-question check. One turn. No "🔄 ⏳" is sent, so there is nothing to delete.
+1. **Strictly trivial message (Step 0 allow-list: pure greeting / pure acknowledgment / pure presence check like "אתה פה?") → NO ACK at all.** Decide this first. Answer directly (`react` or `reply`) and run `python D:/Kai/scripts/dispatch_start.py --no-ack` in the SAME parallel block for the pending-question check. One turn. No "🔄 ⏳" is sent, so there is nothing to delete.
 2. **Every other text message → ONE opening call**: `python D:/Kai/scripts/dispatch_start.py --reply_to ORIGINAL_MSG_ID`. It sends the silent "🔄 ⏳" ACK, prints the pending questions (Step −1) and the last 20 messages (Step 2). Do not run those three as separate calls.
 3. **Inline paths (C, C2, callbacks, dispatcher inline work) finish in ONE turn**: the final `reply` and the ACK unpin+delete go out in the same parallel block (the reply is still sent before the delete lands).
 
@@ -167,7 +167,7 @@ Trivial = ONLY these exact patterns (nothing else):
 - More than 5 words
 - Any uncertainty on your part
 
-If trivial → send the response/reaction, **then** unpin + delete the ACK. (No typing calls — the lease handles it. A `react` has its own PreToolUse hook that stops typing and waits up to ~5.5s for the client-side typing to expire before the reaction lands; this delay is intentional.)
+If trivial → **no ACK was sent** (step shortening, 11/10/2026): send the response/reaction and run `dispatch_start.py --no-ack` in the same parallel block for the pending check. The unpin+delete snippet below applies only if an ACK was sent anyway (e.g. you classified late). (No typing calls — the lease handles it. A `react` has its own PreToolUse hook that stops typing and waits up to ~5.5s for the client-side typing to expire before the reaction lands; this delay is intentional.)
 
 **Option A (reaction):** Use the `react` tool to add an emoji reaction to ORIGINAL_MSG_ID. This is preferred for very short acknowledgments.
   Example: `react(chat_id="${KAI_TELEGRAM_CHAT_ID}", message_id=ORIGINAL_MSG_ID, emoji="🙏🏻")`
