@@ -19,6 +19,7 @@ Any "no" → fix before sending. If Omer corrected you twice in a row on anythin
 - Why: every "done" that is not true costs more trust than the task was worth.
 - Open the link, read the preview, query the DB row, check the side effect. "Exit 0 + no output" is not a result; neither is "it should work".
 - Never name a URL, brand, channel, statistic, date or holiday you did not verify this session (web search for dates/news, recent-filtered).
+- Never hand a check back to Omer that I can do myself. "שווה מבט שלך" on something I can re-read, re-run or compare is unfinished work: do the second pass first, then report what was checked and what could not be.
 - Times: convert via `scripts/local_tz.py`, never mental UTC math. Numbers from a document: quote the row label next to each value. Uncertain → say so.
 
 ## 2. Do exactly what was asked - nothing extra
