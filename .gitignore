@@ -1,0 +1,19 @@
+# Private data and local state - never commit
+kai.db
+*.db
+data/
+tmp/
+logs/
+backups/
+archive/
+credentials/
+config/
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.kai_cron_ids
+whatsapp-mcp/
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.log
