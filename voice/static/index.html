@@ -27,6 +27,11 @@
   #mic.on { background:var(--err); box-shadow:0 0 0 0 rgba(239,68,68,.6); animation:pulse 1.6s infinite; }
   @keyframes pulse { 70% { box-shadow:0 0 0 22px rgba(239,68,68,0); } 100% { box-shadow:0 0 0 0 rgba(239,68,68,0); } }
   #hint { font-size:13px; color:var(--dim); text-align:center; }
+  #stopTalk { display:none; border:0; border-radius:999px; padding:10px 22px; font-size:16px; background:var(--warn); color:#111; }
+  #stopTalk.show { display:block; }
+  #sendTurn { display:none; border:0; border-radius:999px; padding:14px 34px; font-size:18px; background:var(--ok); color:#111; font-weight:600; }
+  #sendTurn.show { display:block; }
+  #hp, #nz { font-size:13px; color:var(--dim); display:flex; gap:6px; align-items:center; }
 </style>
 </head>
 <body>
@@ -34,7 +39,11 @@
 <div id="log"></div>
 <footer>
   <button id="mic" aria-label="התחל או סיים שיחה">🎤</button>
+  <button id="sendTurn">📤 שלח</button>
+  <button id="stopTalk">✋ עצור את קאי</button>
   <div id="hint">לחץ כדי להתחיל לדבר</div>
+  <label id="hp"><input type="checkbox" id="hpBox"> 🎧 עם אוזניות (אפשר להתפרץ בקול)</label>
+  <label id="nz"><input type="checkbox" id="nzBox"> 🔊 סביבה רועשת (שולחים בכפתור)</label>
 </footer>
 
 <script>
@@ -42,10 +51,58 @@
 const $ = (id) => document.getElementById(id);
 const logEl = $("log"), statusEl = $("status"), micBtn = $("mic"), hintEl = $("hint");
 
-let ws = null, ctx = null, micStream = null, micNode = null, srcNode = null;
-let active = false, resumeHandle = null, reconnecting = false;
+let ws = null, ctx = null, outCtx = null, micStream = null, micNode = null, srcNode = null;
+// Playback runs in its own 24 kHz context (Gemini's output rate), so chunks are never resampled one by
+// one (per-chunk resampling clicks at every boundary), and starts LEAD_SEC ahead so network jitter
+// between chunks doesn't leave audible gaps. Choppy + noisy playback on iPhone, 25/09.
+const LEAD_SEC = 0.25;
+let underruns = 0, answerStarted = false;   // answerStarted: this answer already began playing
+// The session connects on page load; the mic streams only while micOn (🎤 pressed). An idle page stops
+// re-connecting after IDLE_MS so it doesn't hold a Gemini session open all day.
+let active = false, micOn = false, resumeHandle = null, reconnecting = false, lastUse = Date.now();
+const IDLE_MS = 10 * 60 * 1000;
+// After 🎤 stop, keep sending silence this long so Gemini's VAD hears the end of speech and answers
+// (tested: audioStreamEnd alone never triggered a reply; 1.5 s of zeros answers in ~0.5 s).
+const STOP_TAIL_MS = 1500;
+let tailUntil = 0;
 let playHead = 0; const playing = new Set();
 let curMe = null, curKai = null;
+// Echo guard: iOS Safari's echo cancellation ignores WebAudio playback, so on the speaker Gemini hears
+// Kai's own voice as Omer barging in and cuts itself off. Without headphones the mic sends silence while
+// Kai speaks (+ a short tail for the room echo); Omer interrupts with the ✋ button instead of his voice.
+const ECHO_TAIL_SEC = 0.4;
+let dropTurnAudio = false;   // after ✋: ignore the rest of the current answer's audio
+const stopTalkBtn = $("stopTalk"), hpBox = $("hpBox");
+try { hpBox.checked = localStorage.getItem("kai_headphones") === "1"; } catch (e) {}
+hpBox.onchange = () => { try { localStorage.setItem("kai_headphones", hpBox.checked ? "1" : "0"); } catch (e) {} };
+function kaiSpeaking() { return !!outCtx && outCtx.currentTime < playHead + ECHO_TAIL_SEC; }
+function updateStopBtn() { stopTalkBtn.classList.toggle("show", playing.size > 0); }
+stopTalkBtn.onclick = () => { dropTurnAudio = true; flushPlayback(); if (isManual()) { pendingStart = false; openUserTurn(); } };
+
+// Noisy-room mode: Gemini's VAD never hears an end of speech over background noise, so the session
+// runs with automatic activity detection off and the page marks turns itself: the mic "opens" a turn
+// once Kai finishes talking, and 📤 closes it. The mode is locked into the session at connect time.
+const sendTurnBtn = $("sendTurn"), nzBox = $("nzBox");
+let userTurnOpen = false, pendingStart = false;
+try { nzBox.checked = localStorage.getItem("kai_noisy") === "1"; } catch (e) {}
+nzBox.onchange = () => { try { localStorage.setItem("kai_noisy", nzBox.checked ? "1" : "0"); } catch (e) {}
+  if (ws && !micOn) reconnect(); else if (micOn) sys("המצב ישתנה אחרי שתסיים לדבר"); };
+function isManual() { return !!(ws && ws.manual); }
+function openUserTurn() {
+  if (!isManual() || !micOn || !ws.ready || userTurnOpen) return;
+  ws.send(JSON.stringify({ realtimeInput: { activityStart: {} } }));
+  userTurnOpen = true; sendTurnBtn.classList.add("show"); setStatus("🔴 מקליט - לחץ שלח כשסיימת", "live");
+}
+function sendTurn() {
+  if (!userTurnOpen || !ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({ realtimeInput: { activityEnd: {} } }));
+  userTurnOpen = false; sendTurnBtn.classList.remove("show"); setStatus("⏳ קאי חושב...", "busy");
+}
+function maybeOpenTurn() {   // after Kai's answer has finished PLAYING (not just arrived) + the echo tail
+  if (!pendingStart || playing.size > 0) return;
+  pendingStart = false; setTimeout(openUserTurn, ECHO_TAIL_SEC * 1000);
+}
+sendTurnBtn.onclick = sendTurn;
 
 function setStatus(text, cls = "") { statusEl.textContent = text; statusEl.className = cls; }
 function addMsg(cls, text) { const d = document.createElement("div"); d.className = "msg " + cls; d.textContent = text;
@@ -74,53 +131,69 @@ function b64(buf) { let s = ""; const b = new Uint8Array(buf); for (let i = 0; i
 function unb64(str) { const s = atob(str); const b = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i); return b.buffer; }
 
 async function startAudio() {
-  ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const AC = window.AudioContext || window.webkitAudioContext;
+  ctx = new AC();
   await ctx.resume();
+  try { outCtx = new AC({ sampleRate: 24000 }); } catch (e) { outCtx = new AC(); }
+  await outCtx.resume();
   micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
   const url = URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" }));
   await ctx.audioWorklet.addModule(url);
   srcNode = ctx.createMediaStreamSource(micStream);
   micNode = new AudioWorkletNode(ctx, "down");
   micNode.port.onmessage = (e) => {
-    if (ws && ws.readyState === 1 && ws.ready)
-      ws.send(JSON.stringify({ realtimeInput: { audio: { data: b64(e.data), mimeType: "audio/pcm;rate=16000" } } }));
+    const inTail = !micOn && Date.now() < tailUntil;
+    if (!(micOn || inTail) || !(ws && ws.readyState === 1 && ws.ready)) return;
+    const mute = inTail || (isManual() ? !userTurnOpen : (!hpBox.checked && kaiSpeaking()));
+    const chunk = mute ? new ArrayBuffer(e.data.byteLength) : e.data;  // silence = same length, all zeros
+    ws.send(JSON.stringify({ realtimeInput: { audio: { data: b64(chunk), mimeType: "audio/pcm;rate=16000" } } }));
   };
   srcNode.connect(micNode);
 }
 function stopAudio() {
   try { srcNode && srcNode.disconnect(); micNode && micNode.disconnect(); } catch (e) {}
   if (micStream) micStream.getTracks().forEach(t => t.stop());
-  flushPlayback(); if (ctx) ctx.close();
-  ctx = micStream = micNode = srcNode = null;
+  flushPlayback(); if (ctx) ctx.close(); if (outCtx) outCtx.close();
+  ctx = outCtx = micStream = micNode = srcNode = null;
 }
 
 // ---------------------------------------------------------------- audio out (24 kHz PCM16)
 function playPcm(buf) {
   const pcm = new Int16Array(buf), f = new Float32Array(pcm.length);
   for (let i = 0; i < pcm.length; i++) f[i] = pcm[i] / 32768;
-  const ab = ctx.createBuffer(1, f.length, 24000); ab.copyToChannel(f, 0);
-  const s = ctx.createBufferSource(); s.buffer = ab; s.connect(ctx.destination);
-  playHead = Math.max(playHead, ctx.currentTime + 0.02); s.start(playHead); playHead += ab.duration;
-  playing.add(s); s.onended = () => playing.delete(s);
+  const ab = outCtx.createBuffer(1, f.length, 24000); ab.copyToChannel(f, 0);
+  const s = outCtx.createBufferSource(); s.buffer = ab; s.connect(outCtx.destination);
+  if (playHead < outCtx.currentTime) {            // start of an answer, or the stream fell behind
+    if (answerStarted) underruns++;
+    playHead = outCtx.currentTime + LEAD_SEC;
+  }
+  answerStarted = true;
+  s.start(playHead); playHead += ab.duration;
+  playing.add(s); s.onended = () => { playing.delete(s); updateStopBtn(); maybeOpenTurn(); }; updateStopBtn();
 }
-function flushPlayback() { playing.forEach(s => { try { s.stop(); } catch (e) {} }); playing.clear(); playHead = 0; }
+function flushPlayback() { playing.forEach(s => { try { s.stop(); } catch (e) {} }); playing.clear(); playHead = 0; updateStopBtn(); maybeOpenTurn(); }
 
 // ---------------------------------------------------------------- Gemini Live session
 async function connect() {
   setStatus("מתחבר...", "busy");
   const t0 = performance.now();
-  const r = await fetch("/api/session" + (resumeHandle ? "?resume=" + encodeURIComponent(resumeHandle) : ""), { credentials: "same-origin" });
+  const manual = nzBox.checked;
+  const q = new URLSearchParams(); if (resumeHandle) q.set("resume", resumeHandle); if (manual) q.set("manual", "1");
+  const r = await fetch("/api/session?" + q, { credentials: "same-origin" });
   const s = await r.json();
   if (!s.ok) throw new Error(s.error === "no_gemini_key" ? "אין עדיין מפתח Gemini בשרת" : (s.error + ": " + (s.detail || "")));
   return new Promise((resolve, reject) => {
-    ws = new WebSocket(s.ws_url); ws.ready = false;
+    ws = new WebSocket(s.ws_url); ws.ready = false; ws.manual = manual;
+    userTurnOpen = false; pendingStart = false; sendTurnBtn.classList.remove("show");
     ws.onopen = () => ws.send(JSON.stringify(s.setup));
     ws.onerror = () => reject(new Error("WebSocket error"));
     ws.onclose = (e) => onClose(e);
     ws.onmessage = async (ev) => {
       const msg = JSON.parse(typeof ev.data === "string" ? ev.data : await ev.data.text());
-      if (msg.setupComplete) { ws.ready = true; setStatus("🟢 מחובר - דבר", "live");
-        sys(`מחובר (${s.model}) תוך ${Math.round(performance.now() - t0)}ms`); resolve(); return; }
+      if (msg.setupComplete) { ws.ready = true;
+        setStatus(micOn ? "🟢 מחובר - דבר" : "🟢 מחובר - לחץ 🎤 כדי לדבר", "live");
+        sys(`מחובר (${s.model}) תוך ${Math.round(performance.now() - t0)}ms${manual ? " - מצב רועש" : ""}`);
+        openUserTurn(); resolve(); return; }
       handle(msg);
     };
   });
@@ -129,14 +202,18 @@ async function connect() {
 function handle(msg) {
   const sc = msg.serverContent;
   if (sc) {
-    if (sc.interrupted) flushPlayback();
+    lastUse = Date.now();
+    if (sc.interrupted) { flushPlayback(); dropTurnAudio = false; answerStarted = false; }
     if (sc.inputTranscription && sc.inputTranscription.text) {
       if (!curMe) curMe = addMsg("me", ""); curMe.textContent += sc.inputTranscription.text; }
     if (sc.outputTranscription && sc.outputTranscription.text) {
       curMe = null; if (!curKai) curKai = addMsg("kai", ""); curKai.textContent += sc.outputTranscription.text; }
     for (const p of (sc.modelTurn && sc.modelTurn.parts) || [])
-      if (p.inlineData && p.inlineData.data) playPcm(unb64(p.inlineData.data));
-    if (sc.turnComplete) { curKai = null; curMe = null; }
+      if (p.inlineData && p.inlineData.data && !dropTurnAudio) playPcm(unb64(p.inlineData.data));
+    if (sc.turnComplete) { curKai = null; curMe = null; dropTurnAudio = false;
+      if (underruns) { sys(`🔊 ${underruns} קטיעות בשמע בתשובה הזאת`); underruns = 0; }
+      answerStarted = false;
+      if (isManual()) { pendingStart = true; maybeOpenTurn(); } }
     logEl.scrollTop = logEl.scrollHeight;
   }
   if (msg.toolCall) for (const fc of msg.toolCall.functionCalls || []) runTool(fc);
@@ -172,32 +249,53 @@ async function runTool(fc) {
   } catch (e) { sendToolResponse(fc, { ok: false, error: String(e) }); }
 }
 
+function idle() { return !micOn && playing.size === 0 && Date.now() - lastUse > IDLE_MS; }
+function goIdle() {
+  if (ws) { ws.onclose = null; try { ws.close(); } catch (e) {} ws = null; }
+  setStatus("💤 במנוחה - לחץ 🎤 כדי לדבר");   // resumeHandle is kept, so the next press continues the same conversation
+}
+
 async function reconnect() {
-  if (reconnecting || !active) return; reconnecting = true;
+  if (reconnecting || !active) return;
+  if (idle()) { goIdle(); return; }
+  reconnecting = true;
   try { const old = ws; ws = null; if (old) { old.onclose = null; old.close(); } await connect(); }
-  catch (e) { sys("❌ " + e.message); stop(); }
+  catch (e) { sys("❌ " + e.message); ws = null; setStatus("נותק - לחץ 🎤 כדי להתחבר", "err"); }
   finally { reconnecting = false; }
 }
 
 function onClose(e) {
   if (!active) return;
   if (e && e.reason) sys("החיבור נסגר: " + e.reason);
-  if (resumeHandle) reconnect(); else { setStatus("נותק", "err"); stop(); }
+  if (resumeHandle) reconnect(); else { ws = null; setStatus("נותק - לחץ 🎤 כדי להתחבר", "err"); }
 }
 
-async function start() {
-  active = true; micBtn.classList.add("on"); micBtn.textContent = "⏹"; hintEl.textContent = "לחץ כדי לסיים";
-  try { await startAudio(); await connect(); }
-  catch (e) { sys("❌ " + e.message); setStatus("שגיאה", "err"); stop(false); }
+async function micStart() {
+  micOn = true; lastUse = Date.now();
+  micBtn.classList.add("on"); micBtn.textContent = "⏹"; hintEl.textContent = "מקשיב... לחץ כדי להפסיק";
+  try {
+    if (!ctx || !micStream) await startAudio();   // needs the tap (iOS audio + mic permission)
+    else { await ctx.resume(); await outCtx.resume(); }
+    if (!ws || ws.readyState !== 1) await reconnect(); else setStatus("🟢 מחובר - דבר", "live");
+    openUserTurn();
+  } catch (e) { sys("❌ " + e.message); setStatus("שגיאה", "err"); micStop(); }
 }
-function stop(resetStatus = true) {
-  active = false; resumeHandle = null;
-  if (ws) { ws.onclose = null; try { ws.close(); } catch (e) {} ws = null; }
-  stopAudio();
-  micBtn.classList.remove("on"); micBtn.textContent = "🎤"; hintEl.textContent = "לחץ כדי להתחיל לדבר";
-  if (resetStatus) setStatus("מנותק");
+function micStop() {
+  micOn = false; lastUse = Date.now();
+  // Close the current utterance so Kai answers it (the mic stream itself stays open to avoid re-prompting).
+  if (ws && ws.readyState === 1 && ws.ready) {
+    if (isManual()) sendTurn();
+    else tailUntil = Date.now() + STOP_TAIL_MS;
+  }
+  userTurnOpen = false; pendingStart = false; sendTurnBtn.classList.remove("show");
+  micBtn.classList.remove("on"); micBtn.textContent = "🎤"; hintEl.textContent = "לחץ כדי לדבר";
+  if (ws && ws.ready && statusEl.textContent.indexOf("קאי חושב") < 0) setStatus("🟢 מחובר - לחץ 🎤 כדי לדבר", "live");
 }
-micBtn.onclick = () => active ? stop() : start();
+micBtn.onclick = () => micOn ? micStop() : micStart();
+
+// Connect as soon as the page opens, so pressing 🎤 starts talking with no wait.
+active = true; hintEl.textContent = "לחץ כדי לדבר";
+connect().catch(e => { sys("❌ " + e.message); ws = null; setStatus("נותק - לחץ 🎤 כדי להתחבר", "err"); });
 
 fetch("/api/health").then(r => r.json()).then(h => { if (!h.gemini_key) sys("⚠️ אין עדיין מפתח Gemini בשרת"); });
 </script>

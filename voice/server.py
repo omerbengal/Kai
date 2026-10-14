@@ -15,6 +15,7 @@ import secrets
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -107,15 +108,17 @@ def _gemini_key():
     return json.loads(GEMINI_KEY_PATH.read_text(encoding="utf-8")).get("api_key")
 
 
-def _mint_token(key, model):
+def _mint_token(key, setup):
     """POST v1beta/auth_tokens (docs: ai.google.dev/gemini-api/docs/ephemeral-tokens)."""
     now = datetime.now(timezone.utc)
     body = {
         "uses": 1,
         "expireTime": (now + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "newSessionExpireTime": (now + timedelta(minutes=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        # Lock the token to our model so a leaked token can't be used for anything else.
-        "liveConnectConstraints": {"model": f"models/{model}"},
+        # The token's setup REPLACES whatever setup the browser sends: a model-only constraint
+        # silently dropped our tools and system prompt. So lock the full setup into the token
+        # (this also means a leaked token can't be used for anything else).
+        "bidiGenerateContentSetup": setup,
     }
     req = urllib.request.Request(
         f"{API_BASE}/v1beta/auth_tokens", data=json.dumps(body).encode(),
@@ -124,7 +127,7 @@ def _mint_token(key, model):
         return json.loads(r.read())["name"]
 
 
-def build_setup(model, resume_handle=None):
+def build_setup(model, resume_handle=None, manual=False):
     gen = {"responseModalities": ["AUDIO"]}
     if CFG.get("voice"):
         gen["speechConfig"] = {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": CFG["voice"]}}}
@@ -133,16 +136,21 @@ def build_setup(model, resume_handle=None):
         "generationConfig": gen,
         "systemInstruction": {"parts": [{"text": prompt.system_instruction()}]},
         "tools": [{"functionDeclarations": prompt.function_declarations()}],
-        "inputAudioTranscription": {},
+        # Pin the transcript to Hebrew: auto-detect showed short Hebrew phrases as Hindi / German (25/09).
+        "inputAudioTranscription": {"languageCodes": ["he-IL"]},
         "outputAudioTranscription": {},
         "sessionResumption": {"handle": resume_handle} if resume_handle else {},
         "contextWindowCompression": {"slidingWindow": {}},
     }
+    if manual:
+        # Noisy-room mode: Gemini's VAD never hears an end of speech over background noise, so the
+        # browser marks turns itself (activityStart when Kai finishes talking, activityEnd on "send").
+        setup["realtimeInputConfig"] = {"automaticActivityDetection": {"disabled": True}}
     return {"setup": setup}
 
 
 @app.get("/api/session")
-async def new_session(request: Request, resume: str = ""):
+async def new_session(request: Request, resume: str = "", manual: int = 0):
     _require(request)
     key = _gemini_key()
     if not key:
@@ -150,13 +158,14 @@ async def new_session(request: Request, resume: str = ""):
                              "detail": f"missing {GEMINI_KEY_PATH}"}, status_code=503)
     t0 = time.perf_counter()
     try:
-        token = await run_in_threadpool(_mint_token, key, CFG["model"])
+        setup = build_setup(CFG["model"], resume or None, bool(manual))
+        token = await run_in_threadpool(_mint_token, key, setup["setup"])
     except urllib.error.HTTPError as e:
         return JSONResponse({"ok": False, "error": "token_mint_failed",
                              "detail": e.read().decode(errors="replace")[:500]}, status_code=502)
     except Exception as e:
         return JSONResponse({"ok": False, "error": "token_mint_failed", "detail": str(e)}, status_code=502)
-    return {"ok": True, "ws_url": f"{WS_URL}?access_token={token}", "setup": build_setup(CFG["model"], resume or None),
+    return {"ok": True, "ws_url": f"{WS_URL}?access_token={token}", "setup": setup,
             "model": CFG["model"], "mint_ms": round((time.perf_counter() - t0) * 1000)}
 
 
@@ -283,9 +292,18 @@ def _save_outgoing(msg_id, text):
 async def _delegate_job(task):
     async with _delegate_sem:
         ok, text, secs = await run_in_threadpool(_run_claude, task, int(CFG["delegate_timeout_sec"]))
+    text, proposal = _split_proposal(text)
     icon = "🎙️" if ok else "⚠️"
     tg_text = f"\u200F{icon} מהשיחה הקולית: {task}\n\n{text}"
-    msg_id = await run_in_threadpool(_telegram, tg_text)
+    keyboard = None
+    if proposal:
+        pid = _save_proposal(proposal, task)
+        tg_text += (f"\n\n‏📤 טיוטה ל{proposal['to']} ({proposal.get('channel', 'whatsapp')}):"
+                    f"\n{proposal['text']}")
+        keyboard = [[{"text": "✅ שלח", "callback_data": f"voice_send_{pid}"},
+                     {"text": "❌ בטל", "callback_data": f"voice_cancel_{pid}"}]]
+        text += "\n(הטיוטה נשלחה לטלגרם לאישור, עוד לא נשלח כלום)"
+    msg_id = await run_in_threadpool(_telegram, tg_text, keyboard)
     await run_in_threadpool(_save_outgoing, msg_id, tg_text)
     action_log("voice", "delegate", f"ok={ok} secs={secs:.1f} task={task[:200]}")
     return {"ok": ok, "result": text, "seconds": round(secs, 1), "telegram_sent": bool(msg_id)}

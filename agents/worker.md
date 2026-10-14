@@ -211,8 +211,6 @@ conn.execute(
     "INSERT INTO reminders (message, trigger_at, recurrence, status) VALUES (?, ?, ?, 'pending')",
     # UTC from Omer's LOCAL time: import sys; sys.path.insert(0,'D:/Kai/scripts'); import local_tz
     # local_tz.local_str_to_utc_str('2026-09-14 12:00')  (force_israel=True for "שעון ישראל")
-    # UTC from Omer's LOCAL time: import sys; sys.path.insert(0,'D:/Kai/scripts'); import local_tz
-    # local_tz.local_str_to_utc_str('2026-09-14 12:00')  (force_israel=True for "שעון ישראל")
     ('<message>', '<YYYY-MM-DD HH:MM:SS UTC>', None)  # recurrence: 'daily'|'weekly'|'monthly'|'yearly'|None
 )
 conn.commit()

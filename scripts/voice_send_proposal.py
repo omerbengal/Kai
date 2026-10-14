@@ -11,7 +11,6 @@ Usage:
 Prints one line for the Telegram reply. Exit 0 = done, 1 = failed / not found.
 """
 import json
-import subprocess
 import sys
 from pathlib import Path
 

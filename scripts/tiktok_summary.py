@@ -600,7 +600,6 @@ def record_format(fmt: dict) -> None:
     recent = (hist.get("recent_styles", []) + [fmt["style"]["key"]])[-5:]
     hist.update({
         "recent_styles": recent,
-        "prev_emojis": hist.get("last_emojis", []),
         "last_emojis": fmt["emojis"],
         "last_ending": fmt["ending_key"],
     })
@@ -766,8 +765,6 @@ def _violations(text: str, fmt: dict) -> list[str]:
         problems.append("ends with a question")
     if fmt["ending_key"] != "question" and re.search(r"תנו לי|תגיבו|שתפו|מה דעתכם|ספרו לי|תעדכנו אותי", text):
         problems.append("call-to-action ending")
-    if fmt["ending_key"] != "question" and re.search(r"תנו לי|תגיבו|שתפו|מה דעתכם|ספרו לי|תעדכנו אותי", text):
-        problems.append("call-to-action ending")
     if re.search(r"קיבלתי את השאלה|שאלו אותי|בלייבים|בסדנאות שלי|תעקבו אחריי", text):
         problems.append("creator first-person voice copied")
     if len([l for l in text.splitlines() if l.strip()]) > 12:
@@ -843,7 +840,6 @@ def summarize_hebrew(transcript: str, oembed: dict | None = None, fmt: dict | No
         "## תיקון שמות אחרי תמלול אוטומטי\n"
         "- Chat GBT / צ'אט GPT = ChatGPT; Antropic / אנת'רופיק = Anthropic; Clod / קלוד (מודל) = Claude; "
         "Open AI = OpenAI; Jemini / ג'מיני = Gemini; קורורג / קו-וורק / Co work = Cowork; "
-        "גרוק = Grok (של xAI, לא Groq); קודקס = Codex; קרסר = Cursor; קורורג / קו-וורק / Co work = Cowork; "
         "גרוק = Grok (של xAI, לא Groq); קודקס = Codex; קרסר = Cursor; Space X = SpaceX; Mid Journey = Midjourney; "
         "גוגל סלייט / גוגל סליידס = Google Slides.\n"
         "- מתקנים רק שיבוש של אותו שם. אסור להחליף שם מוצר או מודל בשם אחר. שם לא מוכר (Fable, Mythos, "
