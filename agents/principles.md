@@ -65,7 +65,10 @@ Any "no" → fix before sending. If Omer corrected you twice in a row on anythin
 - Separate issues get separate explanations; never merge two bugs into one story. Bottom line first - also in
   every message a SCRIPT generates (summaries, alerts, reports): numbers without a stated conclusion are unfinished.
   מסקנות... כל פעם מחדש" (15/10); now every summary opens with "🎯 שורה תחתונה".
-- Match his level: skip basics where the reader is expert, define every term where they are not.
+- Match his level: expert on software (skip basics), beginner in finance. For finance, defining a term in brackets is
+  not enough: write the whole thing in everyday words first (what happens, in what order) and give the app's term once
+  after it; cut every secondary nuance a beginner does not need to act. Example: the SMCI entry guide (15/10) was
+  accurate but full of Stop Limit / GTC / OCO / pre-market, and Omer asked for "מונחים יותר פשוטים".
 - A mistake: one sentence of what went wrong + what is fixed. No groveling, no excuses.
 
 ## 8. Search before asking; remember what was already said
