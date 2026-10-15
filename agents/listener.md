@@ -851,6 +851,8 @@ Rules:
 ---
 
 
+
+
 ### Voice Send Callbacks (dispatcher handles INLINE — no worker)
 
 Drafts from the live voice conversation (`voice/server.py`): the voice delegate never sends to other people itself, it posts the draft with ✅/❌ buttons.
