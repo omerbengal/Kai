@@ -105,3 +105,32 @@ them; 8 are included in this repository), the design docs and the Claude Code se
   only a controlled experiment found the real one.
 - **Outward actions are irreversible.** Anything that reaches other people gets a confirmation
   step whenever the wording, recipient or intent is ambiguous.
+
+## How the commit history was assembled
+
+The commit history has three kinds of commits. They are marked so nobody mistakes one kind for
+another.
+
+1. **Real commits (26), 10/04/2026-25/04/2026.** The original commits of the private repository,
+   with their original messages and dates. Only the files were filtered and scrubbed.
+2. **Reconstructed commits (14), 11/09/2026-13/10/2026.** After 25/04 nothing was committed.
+   These commits were rebuilt from Claude Code session logs, which record every file Write and Edit
+   with a timestamp. Every one of them:
+   - starts with `[reconstructed]`,
+   - ends with the trailer `Reconstructed-from: Claude Code session log, YYYY-MM-DD`,
+   - has the **author date** of the original change and the **committer date** of when it was
+     rebuilt (15/10/2026).
+
+   Limits, stated plainly:
+   - Session logs only survive from 11/09/2026. The period 26/04-10/09/2026 is a single
+     `[reconstructed] Baseline` commit: today's files with every logged edit undone in reverse order.
+     Changes made by shell commands after 11/09 could not be separated and are part of that baseline.
+   - The logs contain 104 Write/Edit operations on the files published here. 39 edits could not be
+     replayed (their `old_string` no longer matched the reconstructed file, usually because a shell
+     command had changed it in between), and 46 could not be undone when building the baseline.
+     1 file's content before its first logged rewrite is unknown, so it first appears at that rewrite.
+   - Intermediate trees are best-effort. Nothing was invented to fill a gap.
+3. **Snapshot commit (1), 15/10/2026.** Makes the tree equal to the scrubbed live system, covering
+   everything the replay could not. Not reconstructed: it is the real state on that date.
+
+From 15/10/2026 on, commits are real: each one is made at the end of a finished feature or fix.
