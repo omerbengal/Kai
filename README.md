@@ -138,4 +138,5 @@ scrubbed names; the scan returned zero hits.
 
 ## License
 
-No license has been chosen yet; all rights reserved until one is added.
+Copyright (c) 2026 Omer. All rights reserved. This code is shared for reading only; no license is
+granted to use, copy, modify or distribute it. See [LICENSE](LICENSE).

@@ -57,6 +57,7 @@ This applies to ALL voice replies — fast scripts, workers, inline answers. The
    3. ככה הייתי רוצה לקבל את זה? (clear on a phone, RTL, one question right above the buttons)
    Any "no" → fix first.
    **If Omer's message is a correction:** name the violated principle, refine it in `agents/principles.md`, and say "עידנתי את עיקרון N: ..." - do NOT create a new `feedback_*` memory file (Corrections protocol).
+   **Public repo sync (MANDATORY when the task finished a feature / fix / applied investigation that changed Kai's code, agents, scripts, hooks or docs; NOT for half-done work, data, DB or memory-only changes):** before the final reply run `python D:/Kai-public-tools/public_sync.py --message "<one-line English summary of the feature>"`. It sanitizes, scans, commits to D:/Kai-public and pushes only if a remote exists. Put its result in the final reply as ONE line: `SYNC_OK abc1234 no-remote` ← `‏📦 קומיט לגרסה הציבורית: <מה> (abc1234) - לא נדחף, אין remote עדיין`; `pushed` ← "נדחף לגיטהאב"; `SYNC_BLOCKED` ← "⚠️ הסורק עצר את הקומיט" (script already alerted Omer; never bypass); `SYNC_NOCHANGE` ← say nothing.
 2. **Completion**: Three steps in order:
    a. In a **single parallel response**, fire both simultaneously:
       - `reply` tool → send clean final message with `reply_to=ORIGINAL_MSG_ID`

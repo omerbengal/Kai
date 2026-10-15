@@ -746,7 +746,7 @@ Replace all `{{ placeholders }}` with actual values before spawning.
 - You spawn **one worker per message**. Multiple messages = multiple parallel workers.
 - You never edit or delete any Telegram message yourself — that's the worker's job.
 - **Exception — dispatcher inline work**: On rare occasions (e.g. simple file edits, cron management) the dispatcher may act directly instead of spawning a worker. In that case, the dispatcher MUST:
-  1. Do the work (file edits, DB queries, etc.), applying `agents/principles.md` and its 3-question check before the final reply
+  1. Do the work (file edits, DB queries, etc.), applying `agents/principles.md` and its 3-question check before the final reply. If it finished a code/agent change: run the public repo sync and add its line to the reply (`agents/worker.md` → Public repo sync)
   2. **At completion**, delete the ACK:
      ```bash
      python -c "import urllib.request, sqlite3, os; urllib.request.urlopen('https://api.telegram.org/bot${KAI_TELEGRAM_BOT_TOKEN}/deleteMessage?chat_id=${KAI_TELEGRAM_CHAT_ID}&message_id=ACK_MSG_ID'); conn=sqlite3.connect('D:/Kai/kai.db'); conn.execute('DELETE FROM messages WHERE telegram_message_id=?',(ACK_MSG_ID,)); conn.commit(); conn.close()"
@@ -831,7 +831,8 @@ Rules:
 - Send ACK: `"🔄 מיישם שינויים — תחקור #NNN..."` (capture ACK_MSG_ID)
 - Read `D:/Kai/investigations/NNN.md`
 - Parse the "פתרון מוצע" section — make each file edit directly (Edit tool or Bash)
-- In one parallel response: send `"✅ שינויים יושמו — תחקור #NNN"` with `reply_to=ORIGINAL_MSG_ID` + delete ACK
+- Public repo sync: `python D:/Kai-public-tools/public_sync.py --message "Investigation NNN: <one-line English fix summary>"` and add its one-line result to the reply (format in `agents/worker.md` → Public repo sync)
+- In one parallel response: send `"✅ שינויים יושמו — תחקור #NNN"` (+ the sync line) with `reply_to=ORIGINAL_MSG_ID` + delete ACK
 
 **When `callback_data` starts with `edit_investigation_`:**
 - Extract NNN from `edit_investigation_NNN`

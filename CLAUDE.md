@@ -134,6 +134,7 @@ Consistency in update behavior matters more than saving 2–3 seconds.
 - **Silent ACKs**: the two transient ACKs (`🔄 ⏳` and `🎤 מתמלל... ⏳`) are sent via `scripts/tg_silent_send.py` (Bot API, `disable_notification=true`, prints only the message_id, saves the `messages` row; `dispatch_start.py` wraps it for the `🔄 ⏳` one), with the `reply` tool as fallback. Every other message, including all final replies, uses the `reply` tool and notifies normally.
 - **Memory**: Update `C:\Users\Omer\.claude\projects\D--Kai\memory\` when learning new info about Omer or project state
 - **DB encoding**: Use `conn.text_factory = str` if Hebrew text appears garbled
+- **Public repo commit at the end of every finished feature** (Omer, 15/10/2026, "חשוב שזה לא יתפספס!"): whoever finishes a feature / fix / applied investigation that changed Kai's code, agents, scripts or hooks (worker, main session, investigation apply) runs `python D:/Kai-public-tools/public_sync.py --message "<English feature summary>"` before the final reply and reports its one line (hash, pushed or "אין remote"). Not per edit, not on a timer, no hook. Scanner hit = no commit, Omer is alerted. Safety net `KaiPublicSyncCheck` (daily 23:50) only alerts if a change sat unsynced >24h. See `agents/worker.md` → Public repo sync.
 - **Code/file edits**: Any `Edit` or `Write` tool call made in direct response to Omer's Telegram message must be followed by a Telegram reply confirming the change: `"✅ [תיאור מה השתנה]"`. Never make silent edits. Omer watches Telegram, not the terminal.
 
 ## Common Patterns
