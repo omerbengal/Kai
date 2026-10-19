@@ -30,13 +30,17 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
+import os
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import net_ipv4  # noqa: F401  IPv6 to Telegram is broken here: +10s per call without this
+
 try:
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 except Exception:
     pass
 
-BOT_TOKEN = __import__("os").environ["KAI_TELEGRAM_BOT_TOKEN"]
+BOT_TOKEN = os.environ["KAI_TELEGRAM_BOT_TOKEN"]
 DB_PATH = "D:/Kai/kai.db"
 
 
@@ -76,7 +80,7 @@ def main():
     p = argparse.ArgumentParser(description="Silent Telegram send (for transient ACKs only)")
     p.add_argument("--text", required=True)
     p.add_argument("--reply_to", default=None)
-    p.add_argument("--chat_id", default=__import__("os").environ.get("KAI_TELEGRAM_CHAT_ID", ""))
+    p.add_argument("--chat_id", default=os.environ.get("KAI_TELEGRAM_CHAT_ID", ""))
     args = p.parse_args()
 
     try:

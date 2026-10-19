@@ -17,6 +17,12 @@ Every tool call is a full model turn (~6 seconds measured), so the wait is turns
 1. **Strictly trivial message (Step 0 allow-list: pure greeting / pure acknowledgment / pure presence check like "אתה פה?") → NO ACK at all.** Decide this first. Answer directly (`react` or `reply`) and run `python D:/Kai/scripts/dispatch_start.py --no-ack` in the SAME parallel block for the pending-question check. One turn. No "🔄 ⏳" is sent, so there is nothing to delete.
 2. **Every other text message → ONE opening call**: `python D:/Kai/scripts/dispatch_start.py --reply_to ORIGINAL_MSG_ID`. It sends the silent "🔄 ⏳" ACK, prints the pending questions (Step −1) and the last 20 messages (Step 2). Do not run those three as separate calls.
 3. **Inline paths (C, C2, callbacks, dispatcher inline work) finish in ONE turn**: the final `reply` and the ACK unpin+delete go out in the same parallel block (the reply is still sent before the delete lands).
+4. **Worker path = 2 turns to spawn** (spawn speedup, 19/10/2026, `docs/agent_spawn_latency.md`). Measured before: ~50s from Omer's message to "agent מוכן", half of it the dispatcher writing a ~2,700-token worker prompt. Now:
+   - **Turn 1** - when the message is clearly worker work (most non-trivial messages), open with ONE call that sends the ACK already titled, logs it and pins it:
+     `python D:/Kai/scripts/dispatch_start.py --reply_to ORIGINAL_MSG_ID --title "<1-line summary>" --pin`
+   - **Turn 2** - `Agent(subagent_type="kai-worker", prompt=<short task block, Step 4>)`. Never paste worker instructions or the last-20 context: the agent file holds the protocol and the worker loads context itself.
+   - **Turn 3** (off the critical path) - `python D:/Kai/scripts/dispatch_map.py <agentId> ACK_MSG_ID ORIGINAL_MSG_ID`.
+   If the opening call's output changes the plan (PENDING shows it answers a pending question handled inline, or the request turns out to be Option C/D), unpin the ACK and continue on that path - rare, and the pin is harmless.
 
 When unsure whether a message is trivial, it is NOT trivial: send the ACK.
 
@@ -59,7 +65,7 @@ python D:/Kai/scripts/tg_pin.py pin {ACK_MSG_ID}   # ONLY at a worker-spawn poin
 - **Option C (factual inline):** Already have ACK. Send answer as a new reply and unpin+delete the ACK in the same parallel block.
 - **Option D (single op):** Update ACK to `🔄 [operation] — ⏳` before running fast script (use `edit_message`, NOT a new reply).
 - **Option D (multiple ops):** Reuse ACK for first operation's summary; send additional separate ACKs for remaining operations.
-- **Worker path:** Update ACK at Step 3 using `edit_message` (do NOT send a new reply).
+- **Worker path:** Already titled + pinned if you opened with `dispatch_start.py --title ... --pin`; otherwise turn it into the worker ACK with `dispatch_start.py --ack_id ... --title ... --pin --no-context` (Step 3). Never a new reply.
 
 ---
 
@@ -599,11 +605,11 @@ If transcription fails: edit ACK_MSG_ID to `❌ לא הצלחתי לתמלל א�
   ⚠️ **NEVER edit the ACK to contain the answer.**
   ⚠️ **ALWAYS send reply BEFORE deleting ACK** — deleting first causes a visible gap where the chat is empty.
 
-- **Otherwise (worker needed)** → ONLY NOW edit ACK_MSG_ID to show agent-creation indicator (do NOT send a new message — just edit):
+- **Otherwise (worker needed)** → ONLY NOW turn ACK_MSG_ID into the agent-creation indicator (do NOT send a new message), in the SAME parallel block as the `kai-worker` Agent call of Step 4:
+  ```bash
+  python D:/Kai/scripts/dispatch_start.py --ack_id ACK_MSG_ID --title "[1-line task summary]" --pin --no-context
   ```
-  edit_message(chat_id="${KAI_TELEGRAM_CHAT_ID}", message_id=ACK_MSG_ID, text="🔄 [1-line task summary] — ⏳ מייצר agent...")
-  ```
-  Then go to Step 4 (which pins the ACK right before spawning - "Pin at spawn").
+  Put the cleaned transcription in the task block's `VOICE:` line so the worker's first edit and final reply show it.
 
 ---
 
@@ -625,17 +631,20 @@ for r in rows:
     print(f"[{r['ts']}] {r['direction']}: {r['text'][:120]}")
 ```
 
-Store this output — you will embed it in the worker prompt.
+Do NOT paste it into the worker prompt: the `kai-worker` agent loads it itself (`dispatch_start.py --no-ack`). Use it only for your own routing decision.
 
 ---
 
 ## Step 3 — Update acknowledgment for worker path
 
-**ACK_MSG_ID is already set** (from Step −2 for text, from Step 1 for voice). Do NOT send a new reply — **edit the existing ACK**:
+**Normal text message:** nothing to do here if you opened with `dispatch_start.py --title ... --pin` (Step shortening rule 4) - the ACK already reads "🔄 [summary] — ⏳ מייצר agent...", is logged and pinned. Go to Step 4.
 
+**ACK already exists with other text** (voice transcription ACK, or you opened with a plain `dispatch_start.py --reply_to` because the path was unclear): do NOT send a new reply - edit, log and pin it in ONE call, in the SAME parallel block as the Agent call of Step 4 (the worker's first edit comes ~5s later, so this lands first):
+
+```bash
+python D:/Kai/scripts/dispatch_start.py --ack_id ACK_MSG_ID --title "<1-line summary>" --pin --no-context
 ```
-edit_message(chat_id="${KAI_TELEGRAM_CHAT_ID}", message_id=ACK_MSG_ID, text="🔄 [1-line summary] — ⏳ מייצר agent...")
-```
+(It edits the ACK to "🔄 <summary> — ⏳ מייצר agent...", writes the ack_log row and pins it. Fallback if it fails: `edit_message` + `log_ack.py --action sent` + `tg_pin.py pin`.)
 
 Examples of the summary text:
 - `"🔄 מחפש טיסות — ⏳ מייצר agent..."`
@@ -645,40 +654,44 @@ Examples of the summary text:
 
 The `⏳ מייצר agent...` suffix tells Omer that spawning is in progress. The worker will replace it with its own status as soon as it starts.
 
-**After editing the ACK, log it:**
-```bash
-python D:/Kai/scripts/log_ack.py --ack_id ACK_MSG_ID --action sent --text "🔄 [summary] — ⏳ מייצר agent..."
-```
+`--title` (with or without `--ack_id`) logs the ack_log "sent" row itself - no separate `log_ack.py` call.
 
-**For voice messages**: ACK already updated with transcription at Step 1. Just edit it now to show the worker summary (same `edit_message` call). ACK_MSG_ID is already set.
+**For voice messages**: ACK already shows the transcription from Step 1. Use the `--ack_id` call above (same parallel block as the Agent call). ACK_MSG_ID is already set.
 
 ---
 
 ## Step 4 — Spawn background worker
 
-**Pin at spawn (the ONLY place a dispatcher pins an ACK):** right before spawning the worker, in the same parallel block as the "⏳ מייצר agent..." edit/log, pin the ACK so the live status of a long task stays in the pinned banner:
-```bash
-python D:/Kai/scripts/tg_pin.py pin {ACK_MSG_ID}
+**Pin at spawn (the ONLY place a dispatcher pins an ACK):** the `--pin` flag of `dispatch_start.py` (Step shortening rule 4 / Step 3) pins the ACK so the live status of a long task stays in the pinned banner. Standalone equivalent: `python D:/Kai/scripts/tg_pin.py pin {ACK_MSG_ID}`.
+Applies to every worker spawn: this step (text + voice "Otherwise (worker needed)"), Options E/G/H, and Investigation Mode. Never pin for A/B, C, C2, D, travel mode or dispatcher inline work. The worker's completion block (and the task-notification fallback below) unpins before deleting.
+
+**Spawn the predefined worker** (`.claude/agents/kai-worker.md` - its body is the whole worker protocol and it runs in the background; it has no `tools` field, so it inherits every MCP tool):
+
 ```
-Applies to every worker spawn: this step (text + voice "Otherwise (worker needed)"), Options E/G, and Investigation Mode. Never pin for A/B, C, C2, D, travel mode or dispatcher inline work. The worker's completion block (and the task-notification fallback below) unpins before deleting.
+Agent(subagent_type="kai-worker", description="<3-5 words>", run_in_background=true, prompt="""
+ACK_MSG_ID: <id>
+ORIGINAL_MSG_ID: <id>
+TITLE: <the same 1-line summary as the ACK>
+MISSION: <1-2 sentences: what Omer wants, as you understood it from the message + context>
+VOICE: <cleaned transcription>          (voice messages only, else omit the line)
+NOTES: <only facts the worker cannot get itself: image_path / attachment_file_id + name, which pending question this answers, an agentId to SendMessage, a decision taken from the context>
+OMER'S EXACT MESSAGE:
+<verbatim text>
+""")
+```
 
-Spawn an **Agent** with `run_in_background: true`. Use the worker prompt template below, filling in all `{{ }}` placeholders with real values. Include both `ACK_MSG_ID` (from Step 3) and `ORIGINAL_MSG_ID` (from the `<channel>` tag).
+Keep the prompt SHORT (target < 400 tokens) - every output token is ~10ms of Omer waiting. Do NOT paste `kai-worker.md`, `worker.md`, principles or the last-20 context: the worker reads principles and runs `dispatch_start.py --no-ack` itself in its second turn.
 
-**After spawning, capture the returned `agentId` and save it to the ACK mapping file:**
-```python
-import json, os
-mapping_file = 'D:/Kai/tmp/task_acks.json'
-try:
-    with open(mapping_file, 'r', encoding='utf-8') as f:
-        mapping = json.load(f)
-except Exception:
-    mapping = {}
-mapping['{{ agent_id from tool result }}'] = {"ack_id": {{ ACK_MSG_ID }}, "orig_id": {{ ORIGINAL_MSG_ID }}}
-with open(mapping_file, 'w', encoding='utf-8') as f:
-    json.dump(mapping, f)
+**Fallback** (the Agent call errors with an unknown `kai-worker` type, e.g. the agent file failed to load): spawn `subagent_type="general-purpose"` with the prompt `Read D:/Kai/.claude/agents/kai-worker.md (skip the frontmatter) and follow it as your instructions. Your task message:` + the same block.
+
+**After spawning, map the agentId to the ACK** (task-notification cleanup needs it):
+```bash
+python D:/Kai/scripts/dispatch_map.py <agentId from the tool result> ACK_MSG_ID ORIGINAL_MSG_ID
 ```
 
 Then stop. Do not wait for the worker.
+
+Options E/G/H and Investigation Mode keep their own prompt files (named in each option) with a general-purpose agent, but use the same one-call ACK (`dispatch_start.py --ack_id ACK_MSG_ID --title "..." --pin --no-context` in the Agent call's parallel block, instead of edit + log_ack + tg_pin) and `dispatch_map.py` after the spawn.
 
 ---
 
@@ -736,8 +749,7 @@ After cleanup, evaluate the notification result normally (e.g., for failed worke
 
 ## Worker Prompt Template
 
-Read `D:/Kai/agents/worker.md` and use its full content as the worker's prompt.
-Replace all `{{ placeholders }}` with actual values before spawning.
+The worker protocol lives in `D:/Kai/.claude/agents/kai-worker.md` (single source of truth; `agents/worker.md` only points to it). The dispatcher sends only the short task block from Step 4 - never the protocol itself.
 
 ---
 
@@ -746,7 +758,7 @@ Replace all `{{ placeholders }}` with actual values before spawning.
 - You spawn **one worker per message**. Multiple messages = multiple parallel workers.
 - You never edit or delete any Telegram message yourself — that's the worker's job.
 - **Exception — dispatcher inline work**: On rare occasions (e.g. simple file edits, cron management) the dispatcher may act directly instead of spawning a worker. In that case, the dispatcher MUST:
-  1. Do the work (file edits, DB queries, etc.), applying `agents/principles.md` and its 3-question check before the final reply. If it finished a code/agent change: run the public repo sync and add its line to the reply (`agents/worker.md` → Public repo sync)
+  1. Do the work (file edits, DB queries, etc.), applying `agents/principles.md` and its 3-question check before the final reply. If it finished a code/agent change: run the public repo sync and add its line to the reply (`.claude/agents/kai-worker.md` → Public repo sync)
   2. **At completion**, delete the ACK:
      ```bash
      python -c "import urllib.request, sqlite3, os; urllib.request.urlopen('https://api.telegram.org/bot${KAI_TELEGRAM_BOT_TOKEN}/deleteMessage?chat_id=${KAI_TELEGRAM_CHAT_ID}&message_id=ACK_MSG_ID'); conn=sqlite3.connect('D:/Kai/kai.db'); conn.execute('DELETE FROM messages WHERE telegram_message_id=?',(ACK_MSG_ID,)); conn.commit(); conn.close()"
@@ -831,7 +843,7 @@ Rules:
 - Send ACK: `"🔄 מיישם שינויים — תחקור #NNN..."` (capture ACK_MSG_ID)
 - Read `D:/Kai/investigations/NNN.md`
 - Parse the "פתרון מוצע" section — make each file edit directly (Edit tool or Bash)
-- Public repo sync: `python D:/Kai-public-tools/public_sync.py --message "Investigation NNN: <one-line English fix summary>"` and add its one-line result to the reply (format in `agents/worker.md` → Public repo sync)
+- Public repo sync: `python D:/Kai-public-tools/public_sync.py --message "Investigation NNN: <one-line English fix summary>"` and add its one-line result to the reply (format in `.claude/agents/kai-worker.md` → Public repo sync)
 - In one parallel response: send `"✅ שינויים יושמו — תחקור #NNN"` (+ the sync line) with `reply_to=ORIGINAL_MSG_ID` + delete ACK
 
 **When `callback_data` starts with `edit_investigation_`:**

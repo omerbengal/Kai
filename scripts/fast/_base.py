@@ -10,6 +10,9 @@ import sys
 import os
 import subprocess
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import net_ipv4  # noqa: F401  IPv6 to Telegram is broken here: +10s per call without this
+
 BOT_TOKEN = os.environ["KAI_TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ.get("KAI_TELEGRAM_CHAT_ID", "")
 DB_PATH = "D:/Kai/kai.db"

@@ -14,8 +14,12 @@ Both public functions are best-effort and NEVER raise — a pin failure must nev
 """
 import json
 import os
+import sys
 import tempfile
 import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import net_ipv4  # noqa: F401  IPv6 to Telegram is broken here: +5s per call without this
 
 BOT_TOKEN = os.environ["KAI_TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ.get("KAI_TELEGRAM_CHAT_ID", "")

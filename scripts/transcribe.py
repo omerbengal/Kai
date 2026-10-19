@@ -15,6 +15,9 @@ import json
 import urllib.request
 import argparse
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import net_ipv4  # noqa: F401  IPv6 to Telegram is broken here: +10s per call without this
+
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"

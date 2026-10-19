@@ -9,6 +9,12 @@ Does what used to be three separate dispatcher steps:
 
 Usage:
     python D:/Kai/scripts/dispatch_start.py --reply_to ORIGINAL_MSG_ID
+    python D:/Kai/scripts/dispatch_start.py --reply_to ORIGINAL_MSG_ID --title "<summary>" --pin
+        # worker path in ONE call (spawn speedup, 19/10/2026): the ACK goes out already
+        # titled "🔄 <summary> — ⏳ מייצר agent...", is logged to ack_log and pinned.
+    python D:/Kai/scripts/dispatch_start.py --ack_id ID --title "<summary>" --pin
+        # an ACK already exists (voice "🎤 מתמלל..." / Option D turned worker): edit it to the
+        # titled text instead of sending a new one, log it, pin it. Prints ACK_MSG_ID=<ID>.
     python D:/Kai/scripts/dispatch_start.py --no-ack          # trivial / voice: pending + context only
 
 Output (stdout):
@@ -28,6 +34,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tg_silent_send
+import tg_pin
+
+BOT_TOKEN = tg_silent_send.BOT_TOKEN
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -73,6 +82,30 @@ def print_context(limit):
         print(f"  context error: {e}")
 
 
+def edit_text(chat_id, message_id, text):
+    import json as _json
+    import urllib.request
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText",
+        data=_json.dumps({"chat_id": chat_id, "message_id": int(message_id), "text": text}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = _json.loads(resp.read().decode("utf-8"))
+    if not data.get("ok") and "not modified" not in str(data.get("description", "")):
+        raise RuntimeError(f"Telegram API error: {data}")
+
+
+def log_ack(ack_id, action, text):
+    from datetime import datetime, timezone
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    conn = sqlite3.connect(DB_PATH, timeout=10)
+    conn.execute("INSERT INTO ack_log (ack_msg_id, action, text, ts) VALUES (?, ?, ?, ?)",
+                 (int(ack_id), action, text, ts))
+    conn.commit()
+    conn.close()
+
+
 def main():
     p = argparse.ArgumentParser(description="Dispatcher start: silent ACK + pending question + context")
     p.add_argument("--reply_to", default=None)
@@ -80,10 +113,26 @@ def main():
     p.add_argument("--chat_id", default=os.environ.get("KAI_TELEGRAM_CHAT_ID", ""))
     p.add_argument("--no-ack", action="store_true")
     p.add_argument("--context", type=int, default=20)
+    p.add_argument("--title", default=None,
+                   help='worker path: ACK text becomes "🔄 <title> — ⏳ מייצר agent..." and is logged to ack_log')
+    p.add_argument("--pin", action="store_true", help="pin the ACK (worker-spawn points ONLY)")
+    p.add_argument("--ack_id", default=None, help="edit this existing ACK instead of sending a new one")
+    p.add_argument("--no-context", action="store_true", help="skip PENDING/CONTEXT output (ACK-only call)")
     args = p.parse_args()
 
+    if args.title:
+        args.text = f"🔄 {args.title} — ⏳ מייצר agent..."
+
+    mid = None
     if args.no_ack:
         print("ACK_MSG_ID=NONE")
+    elif args.ack_id:
+        mid = int(args.ack_id)
+        try:
+            edit_text(args.chat_id, mid, args.text)
+        except Exception as e:
+            print(f"dispatch_start: ACK edit failed: {e}", file=sys.stderr)
+        print(f"ACK_MSG_ID={mid}")
     else:
         try:
             mid = tg_silent_send.send(args.chat_id, args.text, args.reply_to)
@@ -95,7 +144,18 @@ def main():
         except Exception as e:
             print(f"dispatch_start: ACK failed: {e}", file=sys.stderr)
             print("ACK_MSG_ID=FAILED")
+            mid = None
 
+    if mid and args.title:
+        try:
+            log_ack(mid, "sent", args.text)
+        except Exception as e:
+            print(f"dispatch_start: ack_log failed: {e}", file=sys.stderr)
+    if mid and args.pin:
+        tg_pin.pin_ack(mid, args.chat_id)  # best-effort, never raises
+
+    if args.no_context:
+        return
     print_pending()
     print_context(args.context)
 

@@ -15,6 +15,8 @@ delay, the Stop hook removes the pid file and this loop exits WITHOUT ever sendi
 so no typing flash appears after the final message.
 """
 import sys, time, os, json, urllib.request
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import net_ipv4  # noqa: F401  IPv6 to Telegram is broken here: +3s per send without this
 
 LEASE_FILE = "D:/Kai/tmp/typing_lease.json"
 INFLIGHT_FILE = "D:/Kai/tmp/typing_inflight.txt"  # see typing_lease.pause()

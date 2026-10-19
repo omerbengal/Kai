@@ -7,7 +7,7 @@ Kai (קאי) is Omer's personal AI assistant system. It runs autonomously via Cl
 | Agent | Trigger | Role |
 |-------|---------|------|
 | `agents/listener.md` | On incoming Telegram message | **Dispatcher** — parses intent, spawns a background worker agent, sends acknowledgment, stops |
-| Worker agent (spawned inline) | Spawned by dispatcher | **Executor** — does all actual work, sends Telegram updates at every step |
+| `.claude/agents/kai-worker.md` | Spawned by dispatcher (`subagent_type="kai-worker"`, short task block) | **Executor** — does all actual work, sends Telegram updates at every step. Single source of the worker protocol (`agents/worker.md` only points to it) |
 | `agents/morning_briefing_launcher.md` | Manual / on-demand only | Spawns background Agent to compile & send daily briefing. The *scheduled* 09:00 briefing runs from `scripts/run_morning_briefing.py` via the `KaiMorningBriefing` Windows task, not from here. |
 | `agents/morning_briefing.md` | Spawned by launcher | Actual briefing logic: DB, weather, calendar, email, Telegram send |
 
@@ -70,6 +70,8 @@ Workers **edit ACK_MSG_ID** before each step — not new messages. ACK_MSG_ID is
 The ACK is **pinned only when a worker is actually spawned** (`scripts/tg_pin.py` → `pin_ack` / `unpin_ack`, registry at `tmp/pinned_acks.json`; the pin call sits at the worker-spawn points in `agents/listener.md` Step 4 / Options E, G / Investigation Mode) and unpinned right before it is deleted, so the live status of a long task stays in the pinned banner even when Omer scrolls to other conversations. The initial "🔄 ⏳" ACK and the "🎤 מתמלל... ⏳" voice ACK are **never pinned at send time** (Omer's request, 28/09/2026), so short paths (A/B, C, C2, D, inline) do not flash a pin. Unpin on a non-pinned ACK is a harmless no-op, so every deletion point keeps its unpin line. Fast scripts (`scripts/fast/_base.py`) never pin either (removed 28/09/2026); TikTok workers do pin.
 
 See `agents/listener.md` → Mandatory Telegram Update Protocol for the full standard.
+
+**Fast spawn (19/10/2026, `docs/agent_spawn_latency.md`):** the worker path is ONE `dispatch_start.py --reply_to ID --title "<summary>" --pin` call (titled ACK + ack_log + pin), then `Agent(subagent_type="kai-worker")` with a short task block (ACK_MSG_ID, ORIGINAL_MSG_ID, TITLE, MISSION, exact message - never the protocol or the last-20 context), then `dispatch_map.py`. The spawn-path scripts (`tg_silent_send`, `tg_pin`, `dispatch_start`, `typing_loop`, `transcribe`, `fast/_base`) `import net_ipv4` (IPv4 first): IPv6 to api.telegram.org fails ~80% of the time on this PC and cost +5-10s per Telegram call. Add the import to any other script whose Telegram calls are slow.
 
 ## Message Persistence
 
@@ -134,7 +136,7 @@ Consistency in update behavior matters more than saving 2–3 seconds.
 - **Silent ACKs**: the two transient ACKs (`🔄 ⏳` and `🎤 מתמלל... ⏳`) are sent via `scripts/tg_silent_send.py` (Bot API, `disable_notification=true`, prints only the message_id, saves the `messages` row; `dispatch_start.py` wraps it for the `🔄 ⏳` one), with the `reply` tool as fallback. Every other message, including all final replies, uses the `reply` tool and notifies normally.
 - **Memory**: Update `C:\Users\Omer\.claude\projects\D--Kai\memory\` when learning new info about Omer or project state
 - **DB encoding**: Use `conn.text_factory = str` if Hebrew text appears garbled
-- **Public repo commit at the end of every finished feature** (Omer, 15/10/2026, "חשוב שזה לא יתפספס!"): whoever finishes a feature / fix / applied investigation that changed Kai's code, agents, scripts or hooks (worker, main session, investigation apply) runs `python D:/Kai-public-tools/public_sync.py --message "<English feature summary>"` before the final reply and reports its one line (hash, pushed or "אין remote"). Not per edit, not on a timer, no hook. Scanner hit = no commit, Omer is alerted. Safety net `KaiPublicSyncCheck` (daily 23:50) only alerts if a change sat unsynced >24h. See `agents/worker.md` → Public repo sync.
+- **Public repo commit at the end of every finished feature** (Omer, 15/10/2026, "חשוב שזה לא יתפספס!"): whoever finishes a feature / fix / applied investigation that changed Kai's code, agents, scripts or hooks (worker, main session, investigation apply) runs `python D:/Kai-public-tools/public_sync.py --message "<English feature summary>"` before the final reply and reports its one line (hash, pushed or "אין remote"). Not per edit, not on a timer, no hook. Scanner hit = no commit, Omer is alerted. Safety net `KaiPublicSyncCheck` (daily 23:50) only alerts if a change sat unsynced >24h. See `.claude/agents/kai-worker.md` → Public repo sync.
 - **Code/file edits**: Any `Edit` or `Write` tool call made in direct response to Omer's Telegram message must be followed by a Telegram reply confirming the change: `"✅ [תיאור מה השתנה]"`. Never make silent edits. Omer watches Telegram, not the terminal.
 
 ## Common Patterns
