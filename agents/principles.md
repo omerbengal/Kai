@@ -45,6 +45,7 @@ Any "no" → fix before sending. If Omer corrected you twice in a row on anythin
 - Applies to: WhatsApp/email to other people or groups, hard deletes, shared state (pins, sheets, calendars of others).
 - Explicit "send" with clear text and recipient → send. Any ambiguity in wording, recipient or need → draft + buttons.
 - Before a retry of a send, prove the first one failed (action_log / WA DB).
+- A link Omer already has is live: destructive tests on it (cap set to 1, deadline in the past) need a heads-up first, or a separate test deployment.
 
 ## 5. A stated requirement is a hard filter; unknown is not a match
 עברית: דרישה שמישהו אמר היא מסננת, לא בונוס; "לא ידוע" הולך לבדיקה, לא לרשימה הנקייה.
