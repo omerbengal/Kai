@@ -33,6 +33,14 @@ class Linkify(unittest.TestCase):
         self.assertEqual(pl.dial_url("*5090", BASE, bot="My_bot"), BASE + "?n=%2A5090&b=My_bot")
         self.assertEqual(pl.dial_url("*5090", BASE), BASE + "?n=%2A5090")
 
+    def test_mini_app_link(self):
+        self.assertEqual(pl.dial_url("*5090", BASE, bot="My_bot", mini_app=True),
+                         "https://t.me/My_bot?startapp=s5090")
+        self.assertEqual(pl.mini_app_code("<phone>"), "p972501234567")
+        self.assertEqual(pl.mini_app_code("*2700#"), "s2700h")
+        # no bot configured: falls back to the plain page
+        self.assertEqual(pl.dial_url("*5090", BASE, bot="", mini_app=True), BASE + "?n=%2A5090")
+
     def test_no_base_or_no_phone_is_none(self):
         self.assertIsNone(pl.linkify_html("*5090", base=""))
         self.assertIsNone(pl.linkify_html("לקנות חלב", base=BASE))

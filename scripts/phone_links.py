@@ -62,11 +62,29 @@ def find_phones(text):
     return [(m.start(), m.end(), m.group(0)) for m in _PHONE_RE.finditer(text or "")]
 
 
-def dial_url(raw, base, bot=None):
-    """Dial page URL. `bot` (config "bot") lets the page jump back to the bot chat after dialing."""
-    url = base + ("&" if "?" in base else "?") + "n=" + urllib.parse.quote(dial_number(raw), safe="+")
+def mini_app_code(raw):
+    """start_param for the Mini App link: alphabet is [A-Za-z0-9_-], so * # + become s h p."""
+    return dial_number(raw).replace("*", "s").replace("#", "h").replace("+", "p")
+
+
+def dial_url(raw, base, bot=None, mini_app=None):
+    """Dial page URL. `bot` (config "bot") lets the page jump back to the bot chat after dialing.
+
+    With config "mini_app": true (the bot's Main Mini App points at the dial page in BotFather)
+    the link is https://t.me/<bot>?startapp=<code> instead: Telegram opens the page as a Mini
+    App, which can really close itself (Telegram.WebApp.close()) after the dialer opens. A plain
+    in-app-browser page cannot - on iOS it stays minimized as a bar at the bottom (20/10/2026).
+    """
+    cfg = None
+    if mini_app is None or bot is None:
+        cfg = _load_config()
+    if mini_app is None:
+        mini_app = bool(cfg.get("mini_app"))
     if bot is None:
-        bot = (_load_config().get("bot") or "").strip()
+        bot = (cfg.get("bot") or "").strip()
+    if mini_app and bot:
+        return f"https://t.me/{bot}?startapp={mini_app_code(raw)}"
+    url = base + ("&" if "?" in base else "?") + "n=" + urllib.parse.quote(dial_number(raw), safe="+")
     if bot:
         url += "&b=" + urllib.parse.quote(bot, safe="")
     return url

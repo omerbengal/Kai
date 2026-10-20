@@ -33,6 +33,16 @@ def live():
         return False
 
 
+def _rmtree(path):
+    """rmtree that also removes git's read-only object files on Windows."""
+    import stat
+    def _onerror(func, p, _exc):
+        os.chmod(p, stat.S_IWRITE)
+        func(p)
+    if os.path.exists(path):
+        shutil.rmtree(path, onerror=_onerror)
+
+
 def git(*args):
     subprocess.run(["git", "-C", WORK, *args], check=True)
 
@@ -41,8 +51,7 @@ def main():
     if "--check" in sys.argv:
         print(f"live={live()} config={os.path.exists(CONFIG)}")
         return
-    if os.path.exists(WORK):
-        shutil.rmtree(WORK, ignore_errors=True)
+    _rmtree(WORK)
     subprocess.run(["git", "clone", "--depth", "1", REPO_URL, WORK], check=True)
     shutil.copyfile(SRC, os.path.join(WORK, "call.html"))
     git("add", "call.html")
@@ -57,9 +66,14 @@ def main():
         print("NOT_LIVE (pushed, Pages not serving yet - re-run with --check later)")
         sys.exit(1)
     os.makedirs(os.path.dirname(CONFIG), exist_ok=True)
+    cfg = {}
+    if os.path.exists(CONFIG):  # keep "bot" / "mini_app" set earlier
+        with open(CONFIG, encoding="utf-8") as f:
+            cfg = json.load(f)
+    cfg["dial_base"] = PAGE_URL
     with open(CONFIG, "w", encoding="utf-8") as f:
-        json.dump({"dial_base": PAGE_URL}, f, indent=2)
-    shutil.rmtree(WORK, ignore_errors=True)
+        json.dump(cfg, f, indent=2)
+    _rmtree(WORK)
     print("LIVE " + PAGE_URL)
 
 
