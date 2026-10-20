@@ -5,6 +5,7 @@ Every fast script imports from this module.
 import argparse
 import sqlite3
 import urllib.request
+import urllib.error
 import json
 import sys
 import os
@@ -154,7 +155,11 @@ def _send_cards(chat_id, cards, msg_id, text):
                 f"https://api.telegram.org/bot{BOT_TOKEN}/sendContact",
                 data=json.dumps(p, ensure_ascii=False).encode("utf-8"),
                 headers={"Content-Type": "application/json; charset=utf-8"})
-            res = json.loads(urllib.request.urlopen(req, timeout=10).read().decode("utf-8"))
+            try:
+                res = json.loads(urllib.request.urlopen(req, timeout=10).read().decode("utf-8"))
+            except urllib.error.HTTPError as he:
+                phone_links.note_flood(he.read().decode("utf-8", "replace"))  # 429: stop calling sendContact
+                break
             cid = res.get("result", {}).get("message_id")
             if cid:
                 conn = sqlite3.connect(DB_PATH)

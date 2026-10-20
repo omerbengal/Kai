@@ -29,6 +29,7 @@ def fake_api(fail_contacts):
 
 
 def run(monkeypatch, fails):
+    monkeypatch.setattr(phone_links, "flood_until", lambda now=None: None)
     monkeypatch.setattr(phone_links, "_load_config", lambda: {"contact_mode": "card"})
     api, calls = fake_api(fails)
     monkeypatch.setattr(heartbeat, "_tg_api", api)
@@ -61,3 +62,29 @@ def test_two_failures_fall_back_to_text_and_log_why(monkeypatch):
 
 def test_heartbeat_prefers_ipv4():
     assert getattr(socket, "_kai_ipv4_first", False)
+
+
+def test_flood_429_is_remembered_and_skips_cards(monkeypatch, tmp_path):
+    monkeypatch.setattr(phone_links, "FLOOD_PATH", str(tmp_path / "flood.txt"))
+    monkeypatch.setattr(phone_links, "_load_config", lambda: {"contact_mode": "card"})
+    calls = []
+
+    class E429(Exception):
+        def read(self):
+            return b'{"ok":false,"error_code":429,"description":"Too Many Requests: retry after 84425"}'
+
+    def api(method, payload, timeout=10):
+        calls.append(method)
+        if method == "sendContact":
+            raise E429()
+        return {"ok": True, "result": {"message_id": 7}}
+    monkeypatch.setattr(heartbeat, "_tg_api", api)
+    conn = make_conn()
+    heartbeat.send_telegram("⏰ להתקשר למוביט - *5090", conn=conn, alert=True, link=("reminder_id", 251))
+    assert calls == ["sendContact", "sendMessage"]   # no retry into a flood wait
+    assert phone_links.flood_until() is not None
+    calls.clear()
+    heartbeat.send_telegram("⏰ להתקשר למוביט - *5090", conn=conn, alert=True, link=("reminder_id", 251))
+    assert calls == ["sendMessage"]                  # during the ban: straight to text, no API hit
+    (tmp_path / "flood.txt").write_text("1")         # ban over
+    assert phone_links.flood_until() is None

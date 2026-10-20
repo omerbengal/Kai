@@ -4,6 +4,7 @@ import phone_links as pl
 
 BASE = "https://example.com/call.html"
 pl._load_config = lambda: {}  # tests never read the real config/phone_links.json
+pl.FLOOD_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_no_such_flood_file.txt")
 
 
 class FindPhones(unittest.TestCase):

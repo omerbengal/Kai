@@ -119,6 +119,7 @@ def send_telegram(text: str, conn=None, alert=False, link=None, card_label=None)
             except Exception as e:
                 reasons.append(_err_text(e))
                 if "retry after" in reasons[-1].lower():
+                    phone_links.note_flood(reasons[-1])  # no sendContact at all until it ends
                     break  # flood limit: retrying now fails again, send the text
         # never lose a reminder over a card - send the text instead, and say why in action_log
         _log_card_issue(conn, f"card failed, sent as text: {' / '.join(reasons)} | {text[:60]}")
@@ -150,7 +151,9 @@ def send_telegram(text: str, conn=None, alert=False, link=None, card_label=None)
                 cid = r.get("result", {}).get("message_id")
                 _save_row(conn, cid, f"[כרטיס חיוג להודעה {tg_msg_id}] {text}", link, reply_to=tg_msg_id)
             except Exception as e:
-                _log_card_issue(conn, f"card below {tg_msg_id} failed: {_err_text(e)}")
+                why = _err_text(e)
+                phone_links.note_flood(why)
+                _log_card_issue(conn, f"card below {tg_msg_id} failed: {why}")
     return tg_msg_id
 
 

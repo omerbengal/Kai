@@ -62,6 +62,40 @@ CARD_FIRST_MAX = 127   # characters in first_name before the overflow goes to la
 CARD_NAME_MAX = 250    # whole name (first + space + last); longer texts are shortened
 
 
+FLOOD_PATH = os.path.join(os.path.dirname(CONFIG_PATH), "..", "tmp", "contact_flood_until.txt")
+
+
+def note_flood(error_text, now=None):
+    """Remember a sendContact 429 ("retry after N") so nobody calls sendContact until it ends.
+
+    Calling again during a flood wait can extend it; meanwhile every alert goes out as text.
+    20/10/2026: a burst of ~20 test cards earned the bot a 84,425-second (~23.5h) sendContact ban.
+    """
+    m = re.search(r"retry after (\d+)", error_text or "", re.I) or re.search(r'"retry_after":\s*(\d+)', error_text or "")
+    if not m:
+        return None
+    import time
+    until = (now or time.time()) + int(m.group(1))
+    try:
+        os.makedirs(os.path.dirname(FLOOD_PATH), exist_ok=True)
+        with open(FLOOD_PATH, "w", encoding="utf-8") as f:
+            f.write(str(int(until)))
+    except Exception:
+        pass
+    return until
+
+
+def flood_until(now=None):
+    """Epoch seconds until which sendContact is flood-limited, or None."""
+    import time
+    try:
+        with open(FLOOD_PATH, encoding="utf-8") as f:
+            until = int(f.read().strip())
+    except Exception:
+        return None
+    return until if until > (now or time.time()) else None
+
+
 def contact_mode():
     mode = (_load_config().get("contact_mode") or "card").strip()
     return mode if mode in ("card", "below", "off") else "card"
@@ -176,8 +210,8 @@ def plan(text, alert=False):
     out_text = intl_text(text)
     nums = card_numbers(text)
     mode = contact_mode()
-    if mode == "off" or not nums:
-        return {"mode": "text", "text": out_text, "cards": []}
+    if mode == "off" or not nums or flood_until():
+        return {"mode": "text", "text": out_text, "cards": []}  # flood wait: text until it ends
     if mode == "card" and alert and len(nums) == 1:
         first, last = card_names(text, nums[0])
         return {"mode": "card", "text": out_text,
