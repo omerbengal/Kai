@@ -36,10 +36,24 @@ def local_now():
 def send_telegram(text: str, conn=None):
     """Send a Telegram message. If conn is provided, saves to messages table. Returns telegram message_id."""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = json.dumps({"chat_id": CHAT_ID, "text": text}).encode()
-    req = urllib.request.Request(url, payload, {"Content-Type": "application/json"})
-    resp = urllib.request.urlopen(req, timeout=10)
-    data = json.loads(resp.read())
+    base_payload = {"chat_id": CHAT_ID, "text": text}
+    payload = base_payload
+    try:  # phone numbers / star codes become tap-to-dial links (scripts/phone_links.py)
+        import phone_links
+        payload = phone_links.telegram_payload(base_payload)
+    except Exception:
+        payload = base_payload
+
+    def _post(p):
+        req = urllib.request.Request(url, json.dumps(p).encode(), {"Content-Type": "application/json"})
+        return json.loads(urllib.request.urlopen(req, timeout=10).read())
+
+    try:
+        data = _post(payload)
+    except Exception:
+        if payload is base_payload:
+            raise
+        data = _post(base_payload)  # HTML rejected - never lose a reminder over a link
     tg_msg_id = data.get("result", {}).get("message_id")
     if conn is not None and tg_msg_id:
         try:

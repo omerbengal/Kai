@@ -50,7 +50,7 @@ def main():
             display_time = trigger_at
 
         action_log("fast_reminder_create", "created", f'"{args.message}" at {trigger_at} UTC')
-        finish(args, f'{RLM}✅ תזכורת נוצרה!\n{RLM}📅 {display_time}\n{RLM}💬 {args.message}')
+        finish(args, f'{RLM}✅ תזכורת נוצרה!\n{RLM}📅 {display_time}\n{RLM}💬 {args.message}', linkify=True)
     except Exception as e:
         fail(args, f"שגיאה פנימית: {e}")
 

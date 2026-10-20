@@ -116,14 +116,14 @@ def main():
                 for r in groups[dom]:
                     lines.append(f"{RLM}• [P{r['priority']}] {r['title']}{fmt_due(r)}")
                     lines.append("")
-            finish(args, "\n".join(lines).rstrip())
+            finish(args, "\n".join(lines).rstrip(), linkify=True)
         else:
             lines = [f"{RLM}{header}", ""]
             for r in rows:
                 domain_str = f" [{r['domain']}]" if r["domain"] else ""
                 lines.append(f"{RLM}• [P{r['priority']}] {r['title']}{domain_str}{fmt_due(r)}")
                 lines.append("")
-            finish(args, "\n".join(lines).rstrip())
+            finish(args, "\n".join(lines).rstrip(), linkify=True)
     except Exception as e:
         fail(args, f"שגיאה פנימית: {e}")
 

@@ -70,7 +70,7 @@ def main():
             rec_label = f' [{RECURRENCE_LABELS.get(rec, f"🔁 {rec}")}]' if rec else ''
             lines.append(f'{RLM}• {time_str} — {row["message"]}{rec_label}')
 
-        finish(args, '\n'.join(lines))
+        finish(args, '\n'.join(lines), linkify=True)
     except Exception as e:
         fail(args, f"שגיאה פנימית: {e}")
 

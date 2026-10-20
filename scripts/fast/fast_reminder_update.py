@@ -103,7 +103,7 @@ def main():
                 time_display = old_utc
 
         action_log("fast_reminder_update", "updated", f"id={reminder_id} msg_changed={bool(args.new_message)} time_changed={bool(args.trigger_at)}")
-        finish(args, f"{RLM}✅ תזכורת עודכנה:\n{RLM}📌 {final_message}\n{RLM}📅 {time_display}")
+        finish(args, f"{RLM}✅ תזכורת עודכנה:\n{RLM}📌 {final_message}\n{RLM}📅 {time_display}", linkify=True)
     except Exception as e:
         fail(args, f"שגיאה פנימית: {e}")
 

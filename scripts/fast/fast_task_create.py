@@ -50,7 +50,7 @@ def main():
         domain_str = f" | 🏷 {domain_display}" if domain_display else ""
         action_log("fast_task_create", "created", f'"{args.title}" P{args.priority}{domain_str}')
         due_str = f'\n{RLM}📅 {fmt_when(due_at, "%d/%m %H:%M", force_israel=args.israel_time)}' if due_at else ''
-        finish(args, f'{RLM}✅ משימה נוספה!\n{RLM}📌 {args.title}\n{RLM}⚡ עדיפות: {args.priority}{domain_str}{due_str}')
+        finish(args, f'{RLM}✅ משימה נוספה!\n{RLM}📌 {args.title}\n{RLM}⚡ עדיפות: {args.priority}{domain_str}{due_str}', linkify=True)
     except Exception as e:
         fail(args, f"שגיאה פנימית: {e}")
 

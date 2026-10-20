@@ -57,7 +57,7 @@ def base_args(description):
                         "Used for voice-initiated requests so the user always sees what was heard.")
     return p
 
-def tg_reply(chat_id, text, reply_to=None):
+def tg_reply(chat_id, text, reply_to=None, linkify=False):
     """Send a Telegram message and save it to the messages table.
 
     Returns the telegram_message_id of the sent message, or None on failure.
@@ -66,19 +66,35 @@ def tg_reply(chat_id, text, reply_to=None):
     payload = {"chat_id": chat_id, "text": text}
     if reply_to:
         payload["reply_to_message_id"] = int(reply_to)
-    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    req = urllib.request.Request(
-        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-        data=data,
-        headers={"Content-Type": "application/json; charset=utf-8"}
-    )
+    send_payloads = [payload]
+    if linkify:  # reminders/tasks: phone numbers become tap-to-dial links (scripts/phone_links.py)
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            import phone_links
+            linked = phone_links.telegram_payload(payload)
+            if linked is not payload:
+                send_payloads = [linked, payload]  # plain text is the fallback if HTML is rejected
+        except Exception:
+            pass
     msg_id = None
     try:
-        resp = urllib.request.urlopen(req, timeout=10)
-        body = resp.read()
-        result = json.loads(body.decode("utf-8"))
-        if result.get("ok"):
-            msg_id = result["result"]["message_id"]
+        last_err = None
+        for p in send_payloads:
+            req = urllib.request.Request(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                data=json.dumps(p, ensure_ascii=False).encode("utf-8"),
+                headers={"Content-Type": "application/json; charset=utf-8"}
+            )
+            try:
+                resp = urllib.request.urlopen(req, timeout=10)
+                result = json.loads(resp.read().decode("utf-8"))
+                if result.get("ok"):
+                    msg_id = result["result"]["message_id"]
+                    break
+            except Exception as e:
+                last_err = e
+        if msg_id is None and last_err is not None:
+            raise last_err
     except Exception as e:
         # Last-resort: send plain ASCII error so Omer sees something
         err_payload = json.dumps({"chat_id": chat_id, "text": f"fast-script error: {e}"}).encode()
@@ -176,14 +192,14 @@ def delete_ack(ack_msg_id, chat_id):
     tg_delete(chat_id, ack_msg_id)
     log_ack(ack_msg_id, "deleted")
 
-def finish(args, success_text, error_text=None):
+def finish(args, success_text, error_text=None, linkify=False):
     """Stop typing, send final reply, then delete ACK.
     If args.voice_transcription is set, prepend a voice-echo header per worker.md MANDATORY rule."""
     stop_typing(args.orig_id)
     final_text = success_text
     if getattr(args, "voice_transcription", None):
         final_text = f'{RLM}🎤 "{args.voice_transcription}"\n\n{success_text}'
-    tg_reply(args.chat_id, final_text, reply_to=args.orig_id)
+    tg_reply(args.chat_id, final_text, reply_to=args.orig_id, linkify=linkify)
     delete_ack(args.ack_id, args.chat_id)
     print("ok")
 
