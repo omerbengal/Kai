@@ -3,6 +3,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 import phone_links as pl
 
 BASE = "https://example.com/call.html"
+pl._load_config = lambda: {}  # tests never read the real config/phone_links.json
 
 
 class FindPhones(unittest.TestCase):
@@ -28,6 +29,10 @@ class FindPhones(unittest.TestCase):
 
 
 class Linkify(unittest.TestCase):
+    def test_bot_param_for_return_to_chat(self):
+        self.assertEqual(pl.dial_url("*5090", BASE, bot="My_bot"), BASE + "?n=%2A5090&b=My_bot")
+        self.assertEqual(pl.dial_url("*5090", BASE), BASE + "?n=%2A5090")
+
     def test_no_base_or_no_phone_is_none(self):
         self.assertIsNone(pl.linkify_html("*5090", base=""))
         self.assertIsNone(pl.linkify_html("לקנות חלב", base=BASE))

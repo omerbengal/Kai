@@ -37,13 +37,17 @@ _PHONE_RE = re.compile(
 )
 
 
-def _load_base():
+def _load_config():
     try:
         with open(CONFIG_PATH, encoding="utf-8") as f:
-            base = (json.load(f).get("dial_base") or "").strip()
-            return base or None
+            return json.load(f)
     except Exception:
-        return None
+        return {}
+
+
+def _load_base():
+    base = (_load_config().get("dial_base") or "").strip()
+    return base or None
 
 
 def dial_number(raw):
@@ -58,8 +62,14 @@ def find_phones(text):
     return [(m.start(), m.end(), m.group(0)) for m in _PHONE_RE.finditer(text or "")]
 
 
-def dial_url(raw, base):
-    return base + ("&" if "?" in base else "?") + "n=" + urllib.parse.quote(dial_number(raw), safe="+")
+def dial_url(raw, base, bot=None):
+    """Dial page URL. `bot` (config "bot") lets the page jump back to the bot chat after dialing."""
+    url = base + ("&" if "?" in base else "?") + "n=" + urllib.parse.quote(dial_number(raw), safe="+")
+    if bot is None:
+        bot = (_load_config().get("bot") or "").strip()
+    if bot:
+        url += "&b=" + urllib.parse.quote(bot, safe="")
+    return url
 
 
 def linkify_html(text, base=None):
