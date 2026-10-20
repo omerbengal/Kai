@@ -17,6 +17,10 @@ CHAT_ID = os.environ.get("KAI_TELEGRAM_CHAT_ID", "")
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:  # IPv4 first: IPv6 to api.telegram.org hangs ~80% of the time on this PC (net_ipv4.py).
+    import net_ipv4  # noqa: F401  Without it a sendContact hit the 10s timeout (20/10 11:20 UTC)
+except Exception:
+    pass
 try:
     import local_tz  # home timezone: Israel, or the destination while travel mode is on
 except Exception:  # never let the tz helper stop reminders from firing
@@ -33,10 +37,30 @@ def local_now():
     return datetime.now(JERUSALEM_TZ)
 
 
-def _tg_api(method, payload):
+def _tg_api(method, payload, timeout=10):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
     req = urllib.request.Request(url, json.dumps(payload).encode(), {"Content-Type": "application/json"})
-    return json.loads(urllib.request.urlopen(req, timeout=10).read())
+    return json.loads(urllib.request.urlopen(req, timeout=timeout).read())
+
+
+def _err_text(e):
+    """Readable reason for a failed Bot API call (HTTPError body holds Telegram's description)."""
+    try:
+        body = e.read().decode("utf-8", "replace")  # urllib.error.HTTPError
+        return f"{type(e).__name__} {getattr(e, 'code', '')}: {body[:200]}"
+    except Exception:
+        return f"{type(e).__name__}: {str(e)[:200]}"
+
+
+def _log_card_issue(conn, details):
+    """action_log row for every contact-card fallback / retry (agent 'heartbeat', action 'contact_card')."""
+    if conn is None:
+        return
+    try:
+        conn.execute("INSERT INTO action_log (agent, action, details) VALUES ('heartbeat', 'contact_card', ?)",
+                     (details,))
+    except Exception:
+        pass
 
 
 def _save_row(conn, tg_msg_id, text, link=None, reply_to=None):
@@ -74,19 +98,30 @@ def send_telegram(text: str, conn=None, alert=False, link=None, card_label=None)
             prefix = text.split(" ", 1)[0] + " "
             first, last = phone_links.card_names(prefix + card_label)
             plan["cards"][0].update(first=first, last=last)
-    except Exception:
+    except Exception as e:
         plan = None
+        _log_card_issue(conn, f"phone_links plan failed, plain text: {_err_text(e)}")
 
     if plan and plan["mode"] == "card":
         c = plan["cards"][0]
-        try:
-            data = _tg_api("sendContact", phone_links.contact_payload(CHAT_ID, c["number"], c["first"], c["last"]))
-            tg_msg_id = data.get("result", {}).get("message_id")
-            if tg_msg_id:
-                _save_row(conn, tg_msg_id, text, link)
-                return tg_msg_id
-        except Exception:
-            pass  # never lose a reminder over a card - send the text instead
+        reasons = []
+        for attempt in (1, 2):  # one retry: a single slow/failed call must not turn the card into text
+            try:
+                data = _tg_api("sendContact", phone_links.contact_payload(CHAT_ID, c["number"], c["first"], c["last"]),
+                               timeout=15)
+                tg_msg_id = data.get("result", {}).get("message_id")
+                if tg_msg_id:
+                    _save_row(conn, tg_msg_id, text, link)
+                    if reasons:
+                        _log_card_issue(conn, f"card sent on retry after: {reasons[0]} | {text[:60]}")
+                    return tg_msg_id
+                reasons.append(f"no message_id: {str(data)[:150]}")
+            except Exception as e:
+                reasons.append(_err_text(e))
+                if "retry after" in reasons[-1].lower():
+                    break  # flood limit: retrying now fails again, send the text
+        # never lose a reminder over a card - send the text instead, and say why in action_log
+        _log_card_issue(conn, f"card failed, sent as text: {' / '.join(reasons)} | {text[:60]}")
         plan = {"mode": "text", "text": plan["text"], "cards": []}
 
     base_payload = {"chat_id": CHAT_ID, "text": text}
@@ -114,8 +149,8 @@ def send_telegram(text: str, conn=None, alert=False, link=None, card_label=None)
                     CHAT_ID, c["number"], c["first"], c["last"], reply_to=tg_msg_id, silent=True))
                 cid = r.get("result", {}).get("message_id")
                 _save_row(conn, cid, f"[כרטיס חיוג להודעה {tg_msg_id}] {text}", link, reply_to=tg_msg_id)
-            except Exception:
-                pass
+            except Exception as e:
+                _log_card_issue(conn, f"card below {tg_msg_id} failed: {_err_text(e)}")
     return tg_msg_id
 
 
