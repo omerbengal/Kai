@@ -17,6 +17,7 @@ import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SRC = os.path.join(ROOT, "web", "call.html")
+SRC_JS = os.path.join(ROOT, "web", "call.js")  # dial logic, loaded by call.html with a cache-buster
 with open(os.path.join(ROOT, "config", "call_page.json"), encoding="utf-8") as _f:
     _site = json.load(_f)
 REPO_URL = _site["repo_url"]
@@ -27,8 +28,13 @@ CONFIG = os.path.join(ROOT, "config", "phone_links.json")
 
 def live():
     try:
-        with urllib.request.urlopen(PAGE_URL + "?n=1", timeout=15) as r:
-            return r.status == 200 and b"tel:" in r.read()
+        js_url = PAGE_URL.rsplit("/", 1)[0] + "/call.js?t=" + str(time.time())
+        with open(SRC_JS, "rb") as f:
+            want = f.read()
+        with urllib.request.urlopen(js_url, timeout=15) as r:
+            got = r.read()
+        norm = lambda b: b.replace(bytes((13, 10)), bytes((10,))).strip()
+        return r.status == 200 and norm(got) == norm(want)
     except Exception:
         return False
 
@@ -54,7 +60,8 @@ def main():
     _rmtree(WORK)
     subprocess.run(["git", "clone", "--depth", "1", REPO_URL, WORK], check=True)
     shutil.copyfile(SRC, os.path.join(WORK, "call.html"))
-    git("add", "call.html")
+    shutil.copyfile(SRC_JS, os.path.join(WORK, "call.js"))
+    git("add", "call.html", "call.js")
     if subprocess.run(["git", "-C", WORK, "diff", "--cached", "--quiet"]).returncode != 0:
         git("commit", "-m", "Add call.html: tap-to-dial bridge for Kai reminders")
         git("push", "origin", "HEAD")
