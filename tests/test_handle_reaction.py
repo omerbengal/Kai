@@ -341,3 +341,39 @@ def test_fk_lookup_recurring_reminder_rolls_to_next_occurrence(tmp_path):
     conn.close()
     assert status == 'pending'  # series survives the ack
     assert trigger_at > '2026-04-11 09:00:00'  # advanced past the acked occurrence
+
+
+def test_unknown_message_is_ignored_silently(tmp_path, monkeypatch):
+    """A reaction on a message missing from the DB must not message Omer (20/10/2026, msg 17532)."""
+    db = make_db(tmp_path)
+    import handle_reaction
+    handle_reaction.DB_PATH = db
+    sent = []
+    monkeypatch.setattr(handle_reaction, 'send_telegram_error', lambda chat_id, text: sent.append(text))
+    monkeypatch.setattr(sys, 'argv', ['handle_reaction.py', '--chat_id', '123', '--message_id', '999', '--reaction', '👍'])
+    monkeypatch.setattr(handle_reaction.io, 'TextIOWrapper', lambda buf, encoding=None: sys.__stdout__)
+    with pytest.raises(SystemExit) as exc:
+        handle_reaction.main()
+    assert exc.value.code == 0
+    assert sent == []
+    conn = sqlite3.connect(db)
+    row = conn.execute("SELECT action, details FROM action_log WHERE action = 'reaction_unknown_message'").fetchone()
+    conn.close()
+    assert row is not None and '999' in row[1]
+
+
+def test_lookup_skips_reaction_echo_row(tmp_path):
+    """The incoming '[reaction on message N]' row shares N's id; it must not count as the message."""
+    db = make_db(tmp_path)
+    conn = sqlite3.connect(db)
+    conn.execute("INSERT INTO messages (telegram_message_id, direction, text) VALUES (77, 'incoming', '[reaction on message 77] added: 👍')")
+    conn.commit()
+    import handle_reaction
+    handle_reaction.DB_PATH = db
+    with pytest.raises(handle_reaction.MessageNotFound):
+        handle_reaction.lookup_message(handle_reaction.get_connection(), 77)
+    conn.execute("INSERT INTO messages (telegram_message_id, direction, text) VALUES (77, 'outgoing', 'צילום מסך')")
+    conn.commit()
+    conn.close()
+    row = handle_reaction.lookup_message(handle_reaction.get_connection(), 77)
+    assert row['direction'] == 'outgoing'

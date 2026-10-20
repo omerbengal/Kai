@@ -46,8 +46,13 @@ def get_connection() -> sqlite3.Connection:
 
 
 def lookup_message(conn: sqlite3.Connection, message_id: int) -> sqlite3.Row:
+    # Several rows can share a telegram_message_id: the incoming "[reaction on message N]" /
+    # "[callback: ...]" rows the save hook writes carry the TARGET message's id. Prefer the
+    # bot's own outgoing row and never match a reaction-echo row.
     row = conn.execute(
-        'SELECT id, telegram_message_id, text, reactions, direction FROM messages WHERE telegram_message_id = ?',
+        "SELECT id, telegram_message_id, text, reactions, direction FROM messages "
+        "WHERE telegram_message_id = ? AND COALESCE(text, '') NOT LIKE '[reaction on message %' "
+        "ORDER BY (direction = 'outgoing') DESC, id ASC LIMIT 1",
         (message_id,)
     ).fetchone()
     if row is None:
@@ -77,6 +82,20 @@ def log_action(conn: sqlite3.Connection, action: str, details: str) -> None:
         "INSERT INTO action_log (agent, action, details) VALUES ('listener', ?, ?)",
         (action, details)
     )
+
+
+def log_unknown_reaction(message_id: int, reaction: str, mode: str) -> None:
+    """Audit-only record of a reaction on a message missing from the DB. Never raises."""
+    try:
+        conn = get_connection()
+        try:
+            log_action(conn, 'reaction_unknown_message',
+                       f'{mode} {reaction} on telegram_message_id={message_id} - not in DB, ignored')
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f'[handle_reaction] failed to log unknown reaction: {e}', file=sys.stderr)
 
 
 def log_reaction(conn: sqlite3.Connection, message_id: int, emoji: str, action: str) -> None:
@@ -321,9 +340,12 @@ def main():
         else:
             handle_remove(args.message_id, args.reaction, args.chat_id)
     except MessageNotFound as e:
-        send_telegram_error(args.chat_id, f'❌ תגובה: לא נמצאה הודעה {args.message_id} ב-DB')
-        print(f'[handle_reaction] {e}', file=sys.stderr)
-        sys.exit(1)
+        # A reaction on a message that is not in the DB (e.g. a photo part sent before the
+        # save hook learned multi-part ids, 20/10/2026) has nothing to act on. Ignore it
+        # silently - never message Omer about it - and leave an audit line only.
+        log_unknown_reaction(args.message_id, args.reaction, args.mode)
+        print(f'[handle_reaction] ignored: {e}', file=sys.stderr)
+        sys.exit(0)
     except Exception as e:
         send_telegram_error(args.chat_id, f'❌ שגיאה בטיפול בתגובה: {e}')
         print(f'[handle_reaction] unexpected error: {e}', file=sys.stderr)
