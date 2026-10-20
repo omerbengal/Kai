@@ -104,7 +104,7 @@ def main():
         if updated:
             action_log("fast_task_update", "updated", f"task_id={task_id} title={task_title}")
             reply_lines = [f'{RLM}✅ משימה עודכנה: {task_title}'] + changes
-            finish(args, '\n'.join(reply_lines), linkify=True)
+            finish(args, '\n'.join(reply_lines), linkify="intl")
         else:
             fail(args, f'עדכון המשימה "{task_title}" נכשל')
     except Exception as e:

@@ -33,36 +33,89 @@ def local_now():
     return datetime.now(JERUSALEM_TZ)
 
 
-def send_telegram(text: str, conn=None):
-    """Send a Telegram message. If conn is provided, saves to messages table. Returns telegram message_id."""
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+def _tg_api(method, payload):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
+    req = urllib.request.Request(url, json.dumps(payload).encode(), {"Content-Type": "application/json"})
+    return json.loads(urllib.request.urlopen(req, timeout=10).read())
+
+
+def _save_row(conn, tg_msg_id, text, link=None, reply_to=None):
+    if conn is None or not tg_msg_id:
+        return
+    try:
+        conn.execute(
+            "INSERT INTO messages (telegram_message_id, direction, text, reply_to_message_id, ts) "
+            "VALUES (?, 'outgoing', ?, ?, datetime('now'))",
+            (tg_msg_id, text, reply_to)
+        )
+        if link:  # reminder_id / task_id: a 👍 on this message (or its contact card) acts on it
+            col, val = link
+            if col in ("reminder_id", "task_id"):
+                conn.execute(f"UPDATE messages SET {col} = ? WHERE telegram_message_id = ?", (val, tg_msg_id))
+    except Exception:
+        pass
+
+
+def send_telegram(text: str, conn=None, alert=False, link=None, card_label=None):
+    """Send a Telegram message. If conn is provided, saves to messages table. Returns telegram message_id.
+
+    Phone numbers (scripts/phone_links.py, config/phone_links.json): mobile numbers are rewritten
+    to +972-5X-XXX-XXXX (Telegram links them). A star code / landline in a single alert (alert=True)
+    turns the whole alert into a contact card ("contact_mode": "card") whose name is the alert text
+    (or `card_label`, a short label stored with the reminder); in "below" mode the card replies to
+    the text message. Every card row is saved with the same `link` (reminder_id / task_id) so a 👍
+    on it marks the reminder done. Any card failure falls back to the plain text message.
+    """
+    plan = None
+    try:
+        import phone_links
+        plan = phone_links.plan(text, alert=alert)
+        if plan["mode"] == "card" and card_label:
+            prefix = text.split(" ", 1)[0] + " "
+            first, last = phone_links.card_names(prefix + card_label)
+            plan["cards"][0].update(first=first, last=last)
+    except Exception:
+        plan = None
+
+    if plan and plan["mode"] == "card":
+        c = plan["cards"][0]
+        try:
+            data = _tg_api("sendContact", phone_links.contact_payload(CHAT_ID, c["number"], c["first"], c["last"]))
+            tg_msg_id = data.get("result", {}).get("message_id")
+            if tg_msg_id:
+                _save_row(conn, tg_msg_id, text, link)
+                return tg_msg_id
+        except Exception:
+            pass  # never lose a reminder over a card - send the text instead
+        plan = {"mode": "text", "text": plan["text"], "cards": []}
+
     base_payload = {"chat_id": CHAT_ID, "text": text}
     payload = base_payload
-    try:  # phone numbers / star codes become tap-to-dial links (scripts/phone_links.py)
-        import phone_links
-        payload = phone_links.telegram_payload(base_payload)
-    except Exception:
-        payload = base_payload
-
-    def _post(p):
-        req = urllib.request.Request(url, json.dumps(p).encode(), {"Content-Type": "application/json"})
-        return json.loads(urllib.request.urlopen(req, timeout=10).read())
+    if plan and plan["mode"] == "text":
+        payload = {"chat_id": CHAT_ID, "text": plan["text"]}
+    elif plan and plan["mode"] == "legacy":  # dormant Mini App / dial-page path
+        try:
+            payload = phone_links.telegram_payload(base_payload)
+        except Exception:
+            payload = base_payload
 
     try:
-        data = _post(payload)
+        data = _tg_api("sendMessage", payload)
     except Exception:
         if payload is base_payload:
             raise
-        data = _post(base_payload)  # HTML rejected - never lose a reminder over a link
+        data = _tg_api("sendMessage", base_payload)  # never lose a reminder over a link
     tg_msg_id = data.get("result", {}).get("message_id")
-    if conn is not None and tg_msg_id:
-        try:
-            conn.execute(
-                "INSERT INTO messages (telegram_message_id, direction, text, ts) VALUES (?, 'outgoing', ?, datetime('now'))",
-                (tg_msg_id, text)
-            )
-        except Exception:
-            pass
+    _save_row(conn, tg_msg_id, text, link)
+    if tg_msg_id and plan and plan["mode"] == "text":
+        for c in plan["cards"]:
+            try:
+                r = _tg_api("sendContact", phone_links.contact_payload(
+                    CHAT_ID, c["number"], c["first"], c["last"], reply_to=tg_msg_id, silent=True))
+                cid = r.get("result", {}).get("message_id")
+                _save_row(conn, cid, f"[כרטיס חיוג להודעה {tg_msg_id}] {text}", link, reply_to=tg_msg_id)
+            except Exception:
+                pass
     return tg_msg_id
 
 
@@ -117,6 +170,12 @@ def run_heartbeat():
 
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
+    try:  # reminders.card_label (20/10/2026): short contact-card name, see phone_links.py
+        if "card_label" not in [r[1] for r in cur.execute("PRAGMA table_info(reminders)")]:
+            cur.execute("ALTER TABLE reminders ADD COLUMN card_label TEXT")
+            conn.commit()
+    except Exception:
+        pass
 
     sent = []
     errors = []
@@ -124,12 +183,13 @@ def run_heartbeat():
     try:
         # Step 1: Due reminders
         cur.execute(
-            "SELECT id, message, recurrence, trigger_at, series_at, COALESCE(nag_count, 0) FROM reminders "
+            "SELECT id, message, recurrence, trigger_at, series_at, COALESCE(nag_count, 0), card_label FROM reminders "
             "WHERE trigger_at <= datetime('now') AND status = 'pending'"
         )
-        for rid, message, recurrence, trigger_at, series_at, nag_count in cur.fetchall():
+        for rid, message, recurrence, trigger_at, series_at, nag_count, card_label in cur.fetchall():
             try:
-                tg_msg_id = send_telegram(f"⏰ {message}", conn=conn)
+                tg_msg_id = send_telegram(f"⏰ {message}", conn=conn, alert=True,
+                                          link=("reminder_id", rid), card_label=card_label)
                 if tg_msg_id:
                     conn.execute(
                         "UPDATE messages SET reminder_id = ? WHERE telegram_message_id = ?",
@@ -191,7 +251,8 @@ def run_heartbeat():
                 )
                 if cur.fetchone():
                     try:
-                        tg_msg_id = send_telegram(f"📋 [P{priority}] {title} — due in ~{hours_before}h", conn=conn)
+                        tg_msg_id = send_telegram(f"📋 [P{priority}] {title} — due in ~{hours_before}h", conn=conn,
+                                                  alert=True, link=("task_id", tid))
                         if tg_msg_id:
                             conn.execute(
                                 "UPDATE messages SET task_id = ? WHERE telegram_message_id = ?",
@@ -218,7 +279,8 @@ def run_heartbeat():
             )
             if not cur.fetchone():
                 try:
-                    tg_msg_id = send_telegram(f"⚠️ OVERDUE [P{priority}]: {title}", conn=conn)
+                    tg_msg_id = send_telegram(f"⚠️ OVERDUE [P{priority}]: {title}", conn=conn,
+                                              alert=True, link=("task_id", tid))
                     if tg_msg_id:
                         conn.execute(
                             "UPDATE messages SET task_id = ? WHERE telegram_message_id = ?",

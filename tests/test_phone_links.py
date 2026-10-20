@@ -62,6 +62,9 @@ class Linkify(unittest.TestCase):
         self.assertIs(pl.telegram_payload(orig), orig)
         pl._load_base_orig = pl._load_base
         pl._load_base = lambda: BASE
+        cfg_orig = pl._load_config
+        self.assertEqual(pl.telegram_payload({"chat_id": "1", "text": "*5090"})["text"], "*5090")  # mini_app off
+        pl._load_config = lambda: {"mini_app": True}
         try:
             p = pl.telegram_payload({"chat_id": "1", "text": "*5090"})
             self.assertEqual(p["parse_mode"], "HTML")
@@ -69,6 +72,76 @@ class Linkify(unittest.TestCase):
             self.assertEqual(pl.telegram_payload({"chat_id": "1", "text": "*5090"}, linkify=False)["text"], "*5090")
         finally:
             pl._load_base = pl._load_base_orig
+            pl._load_config = cfg_orig
+
+
+class ContactCards(unittest.TestCase):
+    def setUp(self):
+        self.cfg = {}
+        self._orig = pl._load_config
+        pl._load_config = lambda: self.cfg
+
+    def tearDown(self):
+        pl._load_config = self._orig
+
+    def test_intl_format_is_the_autolinked_one(self):
+        # <phone> is one of the two shapes Telegram's server links (tested 20/10)
+        self.assertEqual(pl.to_intl("<phone>"), "<phone>")
+        self.assertEqual(pl.to_intl("<phone>"), "<phone>")
+        self.assertIsNone(pl.to_intl("<phone>"))
+        self.assertIsNone(pl.to_intl("*5090"))
+        self.assertEqual(pl.intl_text("לדני <phone> מחר"), "לדני <phone> מחר")
+
+    def test_card_numbers_only_unlinkable(self):
+        t = "דני <phone>, עירייה <phone>, מוביט *5090, שוב *5090, <phone>"
+        self.assertEqual(pl.card_numbers(t), ["<phone>", "*5090"])
+
+    def test_reminder_alert_becomes_card(self):
+        plan = pl.plan("⏰ להתקשר למוביט - *5090", alert=True)
+        self.assertEqual(plan["mode"], "card")
+        self.assertEqual(plan["cards"], [{"number": "*5090", "first": "⏰ להתקשר למוביט", "last": None}])
+
+    def test_below_mode_and_lists(self):
+        self.cfg = {"contact_mode": "below"}
+        plan = pl.plan("⏰ להתקשר למוביט - *5090", alert=True)
+        self.assertEqual(plan["mode"], "text")
+        self.assertEqual(plan["cards"][0]["first"], "להתקשר למוביט")
+        self.cfg = {}
+        lst = pl.plan("‏📋 תזכורות:\n‏• 20/10 13:00 - להתקשר למוביט - *5090\n‏• לקנות חלב")
+        self.assertEqual(lst["mode"], "text")  # lists never become a card
+        self.assertEqual(len(lst["cards"]), 1)
+        self.assertNotIn("*5090", lst["cards"][0]["first"])
+
+    def test_two_codes_in_alert_go_below(self):
+        plan = pl.plan("⏰ להתקשר לעירייה <phone> ולמוביט *5090", alert=True)
+        self.assertEqual(plan["mode"], "text")
+        self.assertEqual([c["number"] for c in plan["cards"]], ["<phone>", "*5090"])
+        for c in plan["cards"]:
+            self.assertNotIn("*5090", c["first"])
+            self.assertNotIn("<phone>", c["first"])
+
+    def test_mobile_only_alert_is_text(self):
+        plan = pl.plan("⏰ להתקשר לדני <phone>", alert=True)
+        self.assertEqual(plan, {"mode": "text", "text": "⏰ להתקשר לדני <phone>", "cards": []})
+
+    def test_long_text_split_and_shortened(self):
+        long = "⏰ " + "מילה " * 80 + "*5090"
+        first, last = pl.card_names(long, "*5090")
+        self.assertLessEqual(len(first), pl.CARD_FIRST_MAX)
+        self.assertLessEqual(len(first) + 1 + len(last), pl.CARD_NAME_MAX + 1)
+        self.assertTrue(last.endswith("…"))
+        self.assertTrue(first.startswith("⏰ "))
+
+    def test_mini_app_on_is_legacy(self):
+        self.cfg = {"mini_app": True}
+        self.assertEqual(pl.plan("*5090", alert=True)["mode"], "legacy")
+
+    def test_contact_payload(self):
+        p = pl.contact_payload("1", "*5090", "⏰ מוביט", None, reply_to=7, silent=True)
+        self.assertEqual(p["phone_number"], "*5090")
+        self.assertNotIn("last_name", p)
+        self.assertEqual(p["reply_parameters"]["message_id"], 7)
+        self.assertTrue(p["disable_notification"])
 
 
 if __name__ == "__main__":

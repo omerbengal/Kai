@@ -67,15 +67,24 @@ def tg_reply(chat_id, text, reply_to=None, linkify=False):
     if reply_to:
         payload["reply_to_message_id"] = int(reply_to)
     send_payloads = [payload]
-    if linkify:  # reminders/tasks: phone numbers become tap-to-dial links (scripts/phone_links.py)
+    cards = []
+    if linkify:  # reminders/tasks: phone numbers (scripts/phone_links.py, config/phone_links.json)
         try:
             sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
             import phone_links
-            linked = phone_links.telegram_payload(payload)
-            if linked is not payload:
-                send_payloads = [linked, payload]  # plain text is the fallback if HTML is rejected
+            plan = phone_links.plan(text)  # confirmations / lists: never "card" mode
+            if plan["mode"] == "legacy":  # dormant Mini App / dial-page path
+                linked = phone_links.telegram_payload(payload)
+                if linked is not payload:
+                    send_payloads = [linked, payload]  # plain text is the fallback if HTML is rejected
+            else:
+                if plan["text"] != text:  # mobile numbers as +972-5X-... (Telegram auto-links them)
+                    send_payloads = [dict(payload, text=plan["text"]), payload]
+                # star codes / landlines: contact cards replying to the message - lists only;
+                # create/update confirmations (linkify="intl") just get the +972 rewrite
+                cards = plan["cards"] if linkify is True else []
         except Exception:
-            pass
+            cards = []
     msg_id = None
     try:
         last_err = None
@@ -127,7 +136,37 @@ def tg_reply(chat_id, text, reply_to=None, linkify=False):
         except Exception:
             pass  # send already succeeded — DB save is best-effort
 
+    if msg_id is not None and cards:
+        _send_cards(chat_id, cards, msg_id, text)
+
     return msg_id
+
+
+def _send_cards(chat_id, cards, msg_id, text):
+    """Contact cards (tap the number = iPhone dialer) as silent replies to msg_id, rows saved."""
+    import phone_links
+    from datetime import datetime, timezone
+    for c in cards:
+        try:
+            p = phone_links.contact_payload(chat_id, c["number"], c["first"], c["last"],
+                                            reply_to=msg_id, silent=True)
+            req = urllib.request.Request(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendContact",
+                data=json.dumps(p, ensure_ascii=False).encode("utf-8"),
+                headers={"Content-Type": "application/json; charset=utf-8"})
+            res = json.loads(urllib.request.urlopen(req, timeout=10).read().decode("utf-8"))
+            cid = res.get("result", {}).get("message_id")
+            if cid:
+                conn = sqlite3.connect(DB_PATH)
+                conn.execute(
+                    "INSERT INTO messages (telegram_message_id, direction, text, reply_to_message_id, ts) "
+                    "VALUES (?, 'outgoing', ?, ?, ?)",
+                    (int(cid), f"[כרטיס חיוג להודעה {msg_id}] {c['first']} {c['number']}", int(msg_id),
+                     datetime.now(timezone.utc).isoformat()))
+                conn.commit()
+                conn.close()
+        except Exception:
+            pass
 
 def tg_delete(chat_id, msg_id):
     """Delete a Telegram message and remove from DB."""

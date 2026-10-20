@@ -18,6 +18,9 @@ def main():
     p.add_argument("--local_at", default=None, help="LOCAL time 'YYYY-MM-DD HH:MM' (home tz / travel destination)")
     p.add_argument("--israel_time", action="store_true", help="Interpret --local_at as Israel time even while abroad")
     p.add_argument("--recurrence", default=None, help="daily/weekly/monthly/yearly or None")
+    p.add_argument("--card_label", default=None,
+                   help="Short name for the contact card when the reminder holds a star code / landline "
+                        "and the text is longer than ~120 chars (scripts/phone_links.py). Optional.")
     args = p.parse_args()
 
     start_typing(args.chat_id, args.orig_id)
@@ -35,8 +38,8 @@ def main():
 
         conn = get_db()
         conn.execute(
-            "INSERT INTO reminders (message, trigger_at, recurrence, status) VALUES (?, ?, ?, 'pending')",
-            (args.message, trigger_at, args.recurrence if args.recurrence else None)
+            "INSERT INTO reminders (message, trigger_at, recurrence, status, card_label) VALUES (?, ?, ?, 'pending', ?)",
+            (args.message, trigger_at, args.recurrence if args.recurrence else None, args.card_label or None)
         )
         conn.commit()
         # Get inserted row
@@ -50,7 +53,7 @@ def main():
             display_time = trigger_at
 
         action_log("fast_reminder_create", "created", f'"{args.message}" at {trigger_at} UTC')
-        finish(args, f'{RLM}✅ תזכורת נוצרה!\n{RLM}📅 {display_time}\n{RLM}💬 {args.message}', linkify=True)
+        finish(args, f'{RLM}✅ תזכורת נוצרה!\n{RLM}📅 {display_time}\n{RLM}💬 {args.message}', linkify="intl")
     except Exception as e:
         fail(args, f"שגיאה פנימית: {e}")
 

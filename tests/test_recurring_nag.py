@@ -79,7 +79,7 @@ class Sender:
         self.sent = []
         self._next_id = 90000
 
-    def __call__(self, text, conn=None):
+    def __call__(self, text, conn=None, **kwargs):  # alert / link / card_label (phone_links)
         self._next_id += 1
         self.sent.append((text, self._next_id))
         if conn is not None:

@@ -428,6 +428,9 @@ python D:/Kai/scripts/travel_mode.py status
 # (not a fast script: run it inline, then reply with its stdout, reply_to=ORIGINAL_MSG_ID, and delete the ACK)
 
 # Create reminder (--local_at = Omer's LOCAL time; add --israel_time when he says "שעון ישראל")
+# A reminder holding a star code / landline (*5090, 03-...) fires AS a contact card (tap = dialer,
+# scripts/phone_links.py). The card name holds ~250 chars (first+last name, 128 each); if [מה] is
+# longer than ~120 chars add --card_label "[סיכום קצר, אותה משמעות, בלי המספר]".
 python D:/Kai/scripts/fast/fast_reminder_create.py --message "[מה]" --local_at "YYYY-MM-DD HH:MM" --ack_id ACK_MSG_ID --orig_id ORIGINAL_MSG_ID --chat_id ${KAI_TELEGRAM_CHAT_ID} &
 
 # Create task (--priority default 5; --domain optional fuzzy match; --due_local optional LOCAL "YYYY-MM-DD HH:MM")
