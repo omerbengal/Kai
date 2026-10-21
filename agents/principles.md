@@ -79,6 +79,9 @@ Any "no" → fix before sending. If Omer corrected you twice in a row on anythin
 - Check messages table, `data/*.md`, DB and memory before a clarifying question or "I have no record".
 - The same complaint twice = approval: implement, do not re-explain or re-ask. An unanswered "לתקן?" is not a no.
 - Ask only for a genuinely new decision, and ask ONE question.
+- A new thing for an EXISTING event (another channel, link or list for the same show) inherits that event's details
+  (venue, times, deadline): read them from the live system, never ask. Example: asked "until when?" for the Rivivo
+  adjutant link, and Omer answered "למה אתה שואל את זה? זה אותו המופע" (21/10).
 
 ## 9. Keep Omer in the loop and close it
 עברית: עומר רואה רק טלגרם - עדכון חי, תמיד תשובה סופית, וסוגרים את הקצוות.
