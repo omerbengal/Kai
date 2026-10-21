@@ -90,6 +90,7 @@ Any "no" → fix before sending. If Omer corrected you twice in a row on anythin
 עברית: לא מפעילים agent למשהו שסקריפט מהיר או פעולה אחת עושים.
 - Why: a worker costs 30s-2min for a one-call job ("למה agent?!").
 - Clear single op → fast script; known recipient + short composed text → inline; worker only for multi-step/research.
+- A "send" button on an already-approved draft (any callback, not only `voice_send_`) is one send: the dispatcher reads the draft text and sends it inline with the fast script. Resuming the drafting worker counts as using a worker.
 - A presence check ("אתה פה?") is answered at once: no ACK, nothing loaded first, startup chores after the reply.
 
 ## 11. Don't hand-manage the infrastructure
