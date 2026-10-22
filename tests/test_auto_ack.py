@@ -8,7 +8,7 @@ import auto_ack  # noqa: E402
 
 
 def ch(content, **attrs):
-    base = {"source": "telegram", "chat_id": "${KAI_TELEGRAM_CHAT_ID}", "message_id": "100", "user": "omer",
+    base = {"source": "plugin:telegram:telegram", "chat_id": "${KAI_TELEGRAM_CHAT_ID}", "message_id": "100", "user": "omer",
             "ts": "2026-10-22T10:00:00.000Z"}
     base.update(attrs)
     a = " ".join(f'{k}="{v}"' for k, v in base.items())
@@ -111,3 +111,14 @@ def test_cli_dry_run():
                        input=json.dumps({"prompt": prompt}).encode("utf-8"), capture_output=True, timeout=10)
     out = r.stdout.decode("utf-8")
     assert "AUTO_ACK message_id=5000 AUTO_ACK_MSG_ID=DRYRUN" in out
+
+
+def test_real_plugin_source_and_legacy_source():
+    assert cls(ch("תבדוק את המייל")) == ("ack", "🔄 ⏳")
+    assert cls(ch("תבדוק את המייל", source="telegram")) == ("ack", "🔄 ⏳")
+    assert auto_ack.parse_channels(ch("x", source="plugin:discord:discord")) == []
+
+
+def test_gt_inside_quoted_attribute():
+    p = ch("[callback: yes] על: x", callback_data="yes", callback_original_text="a -> b > c")
+    assert cls(p) == ("ack", "🔄 ⏳")

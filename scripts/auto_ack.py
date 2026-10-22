@@ -6,7 +6,7 @@ Why (Omer, 22/10/2026, callback ack_hook_build): the "🔄 ⏳" ACK was only an 
 agents/listener.md. During a burst of messages the dispatcher skipped it on msg 18252 and Omer
 saw nothing. Now the hook sends it the moment the prompt is submitted and tells the model the id.
 
-For every <channel source="telegram" ...> block in the prompt (a burst can carry several):
+For every <channel source="plugin:telegram:telegram" ...> block in the prompt (a burst can carry several):
   - reaction (event_type="reaction")              -> no ACK
   - strict trivial allow-list (listener.md Step 0) -> no ACK (dispatcher answers directly)
   - other chat than Omer's DM                      -> no ACK
@@ -45,7 +45,8 @@ REGISTRY_MAX_AGE_S = 3 * 24 * 3600
 SEND_TIMEOUT_S = 3
 VOICE_KINDS = {"voice", "audio"}
 
-CHANNEL_RE = re.compile(r"<channel(\s[^>]*)?>([\s\S]*?)</channel>")
+# Attribute values are quoted and may contain ">" (reply_to_message_text, callback_original_text).
+CHANNEL_RE = re.compile(r'<channel((?:\s+[A-Za-z_][\w-]*="[^"]*")*)\s*>([\s\S]*?)</channel>')
 ATTR_RE = re.compile(r'([A-Za-z_][\w-]*)="([^"]*)"')
 
 # Mirror of listener.md Step 0 "Trivial = ONLY these exact patterns". Keep the two in sync.
@@ -71,7 +72,9 @@ def parse_channels(prompt):
     out = []
     for m in CHANNEL_RE.finditer(prompt or ""):
         attrs = dict(ATTR_RE.findall(m.group(1) or ""))
-        if attrs.get("source", "telegram") != "telegram":
+        # The live plugin tags itself source="plugin:telegram:telegram" (22/10/2026: the old
+        # exact "telegram" check skipped every real message, so no ACK was ever sent).
+        if "telegram" not in attrs.get("source", "telegram"):
             continue
         out.append((attrs, m.group(2).strip()))
     return out
