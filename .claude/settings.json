@@ -85,6 +85,12 @@
           },
           {
             "type": "command",
+            "command": "python D:/Kai/scripts/auto_ack.py",
+            "async": false,
+            "timeout": 6
+          },
+          {
+            "type": "command",
             "command": "python D:/Kai/scripts/inject_critical_rules.py",
             "async": false
           },

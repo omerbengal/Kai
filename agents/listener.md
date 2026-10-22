@@ -14,6 +14,17 @@ The `ORIGINAL_MSG_ID` is the `message_id` from the incoming `<channel>` tag. Eve
 
 Every tool call is a full model turn (~6 seconds measured), so the wait is turns x 6s. Three rules cut turns without touching quality:
 
+0. **The ACK is sent by CODE, not by you (auto-ACK hook, 22/10/2026, Omer's approval `ack_hook_build`).** The `UserPromptSubmit` hook `scripts/auto_ack.py` sends the silent ACK before your first turn and injects one line per `<channel>` block: `AUTO_ACK message_id=<ORIGINAL_MSG_ID> AUTO_ACK_MSG_ID=<id>`. Why: on 22/10 a burst of messages made the dispatcher skip the ACK on msg 18252.
+   - **`AUTO_ACK_MSG_ID=<number>`** → that IS your ACK_MSG_ID. **Never send another ACK** (no `dispatch_start.py --reply_to`, no `tg_silent_send.py`). Text messages / callbacks / documents / photos got `🔄 ⏳`; voice/audio got `🎤 מתמלל... ⏳` (Step 1 then skips its send and goes straight to download + `transcribe.py --ack_id <id>`).
+     - Context + pending: `dispatch_start.py --no-ack` (inline paths), or on the worker path ONE call that titles, logs and pins the existing ACK and prints the context: `python D:/Kai/scripts/dispatch_start.py --ack_id <id> --title "<1-line summary>" --pin` (add `--no-context` if you already loaded it).
+     - Inline paths (C, C2, D, callbacks) delete it exactly as before; fast scripts get it as `--ack_id`.
+     - If YOU judge the message trivial although the hook ACKed it → answer, then unpin+delete that ACK in the same parallel block (Step 0 snippet).
+   - **`AUTO_ACK_MSG_ID=NONE reason=trivial|reaction|other_chat`** → no ACK exists. Reactions go to Step 0a. For `trivial`, the classification is still yours: if you decide it is NOT trivial, send the ACK yourself as below.
+   - **`AUTO_ACK_MSG_ID=FAILED`** or **no `AUTO_ACK` line** for a Telegram message (hook not loaded / timed out) → the manual flow below, unchanged.
+   The hook's trivial list mirrors Step 0 - change both together (`_TRIVIAL_*` in `scripts/auto_ack.py`, tests in `tests/test_auto_ack.py`). The hook is idempotent per message (`tmp/auto_ack/`), so a re-delivered prompt reports `(already sent)` with the same id.
+
+The rules below describe the manual ACK; when rule 0 gave you an AUTO_ACK_MSG_ID, skip every "send the ACK" step in them and use that id.
+
 1. **Strictly trivial message (Step 0 allow-list: pure greeting / pure acknowledgment / pure presence check like "אתה פה?") → NO ACK at all.** Decide this first. Answer directly (`react` or `reply`) and run `python D:/Kai/scripts/dispatch_start.py --no-ack` in the SAME parallel block for the pending-question check. One turn. No "🔄 ⏳" is sent, so there is nothing to delete.
 2. **Every other text message → ONE opening call**: `python D:/Kai/scripts/dispatch_start.py --reply_to ORIGINAL_MSG_ID`. It sends the silent "🔄 ⏳" ACK, prints the pending questions (Step −1) and the last 20 messages (Step 2). Do not run those three as separate calls.
 3. **Inline paths (C, C2, callbacks, dispatcher inline work) finish in ONE turn**: the final `reply` and the ACK unpin+delete go out in the same parallel block (the reply is still sent before the delete lands).
@@ -29,6 +40,8 @@ When unsure whether a message is trivial, it is NOT trivial: send the ACK.
 ---
 
 ## Step −2 — Immediate ACK (non-trivial text messages only)
+
+> **Auto-ACK first (Step shortening rule 0):** if the context has `AUTO_ACK message_id=ORIGINAL_MSG_ID AUTO_ACK_MSG_ID=<number>`, the ACK is already out - set ACK_MSG_ID to it and skip sub-step 1. Everything below is the fallback for `FAILED` / missing.
 
 **For non-trivial text messages** (no `attachment_file_id`, and not on the strict trivial allow-list of Step 0): Before any other action — **including before any `=== STARTUP ACTIONS REQUIRED ===` block** — send an ACK so Omer has instant feedback:
 
@@ -171,7 +184,7 @@ Trivial = ONLY these exact patterns (nothing else):
 - More than 5 words
 - Any uncertainty on your part
 
-If trivial → **no ACK was sent** (step shortening, 11/10/2026): send the response/reaction and run `dispatch_start.py --no-ack` in the same parallel block for the pending check. The unpin+delete snippet below applies only if an ACK was sent anyway (e.g. you classified late). (No typing calls — the lease handles it. A `react` has its own PreToolUse hook that stops typing and waits up to ~5.5s for the client-side typing to expire before the reaction lands; this delay is intentional.)
+If trivial → **no ACK was sent** (step shortening, 11/10/2026; the auto-ACK hook skips the same allow-list and reports `AUTO_ACK_MSG_ID=NONE reason=trivial` - if it reported a number instead, delete that ACK after your answer): send the response/reaction and run `dispatch_start.py --no-ack` in the same parallel block for the pending check. The unpin+delete snippet below applies only if an ACK was sent anyway (e.g. you classified late). (No typing calls — the lease handles it. A `react` has its own PreToolUse hook that stops typing and waits up to ~5.5s for the client-side typing to expire before the reaction lands; this delay is intentional.)
 
 **Option A (reaction):** Use the `react` tool to add an emoji reaction to ORIGINAL_MSG_ID. This is preferred for very short acknowledgments.
   Example: `react(chat_id="${KAI_TELEGRAM_CHAT_ID}", message_id=ORIGINAL_MSG_ID, emoji="🙏🏻")`
@@ -551,6 +564,8 @@ Do NOT download. Do NOT transcribe. Do NOT think. **Send the ACK first.**
 Only after the ACK reply succeeds and you have ACK_MSG_ID — proceed.
 
 If the incoming message has an `attachment_file_id`:
+
+**Auto-ACK:** if the context has `AUTO_ACK message_id=ORIGINAL_MSG_ID AUTO_ACK_MSG_ID=<number>`, the hook already sent `🎤 מתמלל... ⏳` - that number is ACK_MSG_ID; skip the send below and go to "THEN". Send it yourself only on `FAILED` / no AUTO_ACK line.
 
 **FIRST — before any other action:**
 Send the voice ACK **silently** (no sound/vibration, Omer's request 28/09/2026), text = `🎤 מתמלל... ⏳`, replying to ORIGINAL_MSG_ID:
