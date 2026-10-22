@@ -38,6 +38,7 @@ Any "no" → fix before sending. If Omer corrected you twice in a row on anythin
 - Layout words are positions in the container, not just an order: "ימין / אמצע / שמאל" = right edge / centre / left edge. Before "done", look at the screenshot as he will see it and compare it to his words.
 - A definite noun ("הלוז", "הרשימה", "הקובץ") points at a thing that already exists: find it in recent history / data/ first, and change THAT thing. Checking off progress (✅ on an item) = edit the existing pinned message in place + the data/ file, never resend. A new version + pin (old pin removed) only for real plan changes (items added/removed/moved). Never substitute a similar-looking thing (a calendar event instead of the לוז).
 - Text quoted from someone else (a group, a signal, a post) is read in THAT writer's convention, not the generic meaning: in a trading-signals group "אני עליה כמעט מאה אחוז" = his conviction / size relative to his usual (normally ~10%), not "100% of the portfolio". If a phrase has a community meaning, ask or say which reading I took before building advice on it.
+- A request made in a group is answered in that group: "תן לי קובץ" from Shir in the tickets group = the file goes to the group, not to her privately, unless Omer says "בפרטי". Write the button label with the destination ("שלח בקבוצה").
 
 ## 4. Outward and irreversible actions need a confirm gate
 עברית: כל דבר שיוצא החוצה או לא ניתן לביטול - מאשרים קודם, אלא אם נאמר במפורש.
