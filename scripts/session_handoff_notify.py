@@ -50,28 +50,9 @@ def announce_timezone():
         print(f"=== TIMEZONE === could not read travel mode ({e}); run python D:/Kai/scripts/travel_mode.py status")
 
 
-POST_RESTART_TASK = "D:/Kai/tmp/post_restart_task.md"
-
-
-def announce_post_restart_task():
-    """A task the previous session asked the new one to do right after restarting (one-shot)."""
-    try:
-        with open(POST_RESTART_TASK, "r", encoding="utf-8") as f:
-            task = f.read().strip()
-        os.remove(POST_RESTART_TASK)
-    except OSError:
-        return
-    if task:
-        print("")
-        print("=== POST-RESTART TASK (from the previous session, do it now) ===")
-        print(task)
-        print("================================================================")
-
-
 def main():
     announce_timezone()
     announce_startup_actions()
-    announce_post_restart_task()
 
     if not os.path.exists(HANDOFF_FILE):
         return
