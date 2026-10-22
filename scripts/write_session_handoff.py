@@ -9,12 +9,15 @@ to D:/Kai/tmp/session_handoff.md so the new session knows the context.
 import sqlite3
 import sys
 import os
-from datetime import datetime, timezone, timedelta
+
+sys.path.insert(0, "D:/Kai/scripts")
+import local_tz  # Israel, or the travel-mode destination
 
 HANDOFF_FILE = "D:/Kai/tmp/session_handoff.md"
 DB_PATH = "D:/Kai/kai.db"
-JERUSALEM = timezone(timedelta(hours=3))
-NUM_MESSAGES = 10
+NUM_MESSAGES = 50  # Omer 22/10/2026: 10 was too little context after a restart
+# transient status messages take slots without adding context
+TRANSIENT_PREFIXES = ("🔄", "🎤 מתמלל", "🔍 מתחקר")
 
 
 def main():
@@ -23,22 +26,21 @@ def main():
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
 
-    cur.execute(
-        "SELECT direction, text, ts FROM messages ORDER BY ts DESC LIMIT ?",
-        (NUM_MESSAGES,)
-    )
-    rows = list(reversed(cur.fetchall()))
+    # ORDER BY id: ts mixes 'YYYY-MM-DD HH:MM' and ISO 'T' formats, which sort wrong as text
+    cur.execute("SELECT direction, text, ts FROM messages ORDER BY id DESC LIMIT ?", (NUM_MESSAGES * 3,))
+    rows = [r for r in cur.fetchall()
+            if not (r["direction"] == "outgoing" and (r["text"] or "").lstrip().startswith(TRANSIENT_PREFIXES))]
+    rows = list(reversed(rows[:NUM_MESSAGES]))
     conn.close()
 
     if not rows:
         return
 
-    lines = [f"הודעות אחרונות לפני ריסטארט ({datetime.now(JERUSALEM).strftime('%Y-%m-%d %H:%M')} ירושלים):\n"]
+    lines = [f"הודעות אחרונות לפני ריסטארט ({local_tz.now_local():%Y-%m-%d %H:%M} {local_tz.tz_label() or 'ישראל'}):\n"]
     for r in rows:
         ts_raw = r["ts"]
         try:
-            dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00")).astimezone(JERUSALEM)
-            ts_str = dt.strftime("%H:%M")
+            ts_str = local_tz.fmt_local(ts_raw, "%H:%M", label=False)
         except Exception:
             ts_str = ts_raw[:16]
 
