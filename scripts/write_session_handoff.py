@@ -15,12 +15,15 @@ import local_tz  # Israel, or the travel-mode destination
 
 HANDOFF_FILE = "D:/Kai/tmp/session_handoff.md"
 DB_PATH = "D:/Kai/kai.db"
-NUM_MESSAGES = 50  # Omer 22/10/2026: 10 was too little context after a restart
+NUM_MESSAGES = 200  # Omer 22/10/2026: 10, then 50, was too little context after a restart
+# No per-message cut (Omer 22/10: long Kai replies must be readable in full).
+# Safety net only: if the total passes this, the OLDEST messages are dropped whole.
+MAX_TOTAL_CHARS = 120_000
 # transient status messages take slots without adding context
 TRANSIENT_PREFIXES = ("🔄", "🎤 מתמלל", "🔍 מתחקר")
 
 
-def main():
+def main(out_path=HANDOFF_FILE):
     conn = sqlite3.connect(DB_PATH)
     conn.text_factory = str
     conn.row_factory = sqlite3.Row
@@ -36,7 +39,8 @@ def main():
     if not rows:
         return
 
-    lines = [f"הודעות אחרונות לפני ריסטארט ({local_tz.now_local():%Y-%m-%d %H:%M} {local_tz.tz_label() or 'ישראל'}):\n"]
+    header = f"הודעות אחרונות לפני ריסטארט ({local_tz.now_local():%Y-%m-%d %H:%M} {local_tz.tz_label() or 'ישראל'}):\n"
+    body = []
     for r in rows:
         ts_raw = r["ts"]
         try:
@@ -45,18 +49,24 @@ def main():
             ts_str = ts_raw[:16]
 
         direction = "עומר" if r["direction"] == "incoming" else "קאי"
-        text = (r["text"] or "").strip()[:200]
-        lines.append(f"[{ts_str}] {direction}: {text}")
+        text = (r["text"] or "").strip()  # full text, never cut (Omer 22/10/2026)
+        body.append(f"[{ts_str}] {direction}: {text}")
 
-    content = "\n".join(lines)
+    # safety cap: drop the OLDEST whole messages until under the limit, never cut one mid-text
+    total = len(header) + sum(len(b) + 1 for b in body)
+    while body and total > MAX_TOTAL_CHARS:
+        total -= len(body.pop(0)) + 1
+    rows = body
+    content = "\n".join([header] + body)
 
-    os.makedirs(os.path.dirname(HANDOFF_FILE), exist_ok=True)
-    with open(HANDOFF_FILE, "w", encoding="utf-8") as f:
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w", encoding="utf-8") as f:
         f.write(content)
 
     sys.stdout.reconfigure(encoding="utf-8") if hasattr(sys.stdout, "reconfigure") else None
-    print(f"Handoff written: {len(rows)} messages -> {HANDOFF_FILE}")
+    print(f"Handoff written: {len(rows)} messages ({len(content)} chars) -> {out_path}")
 
 
 if __name__ == "__main__":
-    main()
+    # --out PATH writes elsewhere (test run without touching the real handoff file)
+    main(sys.argv[sys.argv.index("--out") + 1] if "--out" in sys.argv else HANDOFF_FILE)
