@@ -61,6 +61,7 @@ Any "no" → fix before sending. If Omer corrected you twice in a row on anythin
 - Hebrew: `‏` on every line, status emoji at the end, ← (never →; no arrows in mixed Hebrew/English), "-" never an em dash, blank line between list items, URLs surrounded by spaces, light skin tone only on hand/person emojis.
 - To other people: write it the way Omer would write it to that person (contact_rules.md).
 - Text meant to be read by others gets one read-through as the reader: an effect word or rhetorical move ("פתאום", "דמיינו") appears once per post, never twice. For text a script generates repeatedly, that is a check in CODE, not a prompt wish.
+- A chart marking must look like what it means: a price range is a box from its high to its low, never a full-height time strip (ORB failure charts 27/10: Omer read the yellow strip as the range and saw it miss the candles).
 - A new call-to-action on a page someone opens (a join button, a notice) goes FIRST, right under the greeting, not after the existing content.
 
 ## 7. Explain simply and accurately; own mistakes plainly
