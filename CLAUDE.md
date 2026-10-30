@@ -94,6 +94,8 @@ See `agents/listener.md` Step 2 for the exact query.
 | `scripts/save_telegram_message.py` | Persist incoming/outgoing Telegram messages to DB |
 | `scripts/patch_telegram_plugin.py` | Auto-patch Telegram plugin to expose reply_to metadata |
 | `scripts/heartbeat.py` | Standalone heartbeat (for Windows Task Scheduler) |
+| `scripts/transcribe.py` | Voice-note transcription: local Hebrew service first, Groq `whisper-large-v3` fallback on any failure; logs the engine to `action_log` (`asr_local` / `asr_groq`) |
+| `scripts/asr_server.py` | Local Hebrew ASR (ivrit.ai Whisper turbo on the GPU, `.venv`, 127.0.0.1:8787, `/health`). Task `KaiAsrServer` (logon + every 5 min, IgnoreNew) keeps it up; off = disable the task + stop it, Groq takes over automatically |
 
 ## Startup
 

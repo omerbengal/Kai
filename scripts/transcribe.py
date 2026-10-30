@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-Transcribe an audio file using Groq's whisper-large-v3 API.
+Transcribe an audio file: the local Hebrew model first, Groq whisper-large-v3 as fallback.
+
+Since 30/10/2026 the local service scripts/asr_server.py (ivrit.ai Hebrew Whisper on the
+GPU, 127.0.0.1:8787) is tried first; on ANY failure - service down, still loading, slow,
+error, empty text - the Groq path below runs exactly as before. Each run logs the engine
+used to action_log (agent='transcribe', action='asr_local' | 'asr_groq').
 Usage: python transcribe.py <audio_file_path> [--ack_id MSG_ID] [--chat_id CHAT_ID]
 
 If --ack_id is provided, edits the Telegram ACK message with the transcription
@@ -59,7 +64,74 @@ def apply_corrections(text: str) -> str:
     return text
 
 
+LOCAL_HOST = "127.0.0.1"
+LOCAL_PORT = 8787
+LOCAL_CONNECT_TIMEOUT = 0.5
+# Telegram voice notes (Opus) run ~3.8 KB per second of audio; dividing by 3000 errs long,
+# which only makes the read timeout a little more generous.
+BYTES_PER_AUDIO_SECOND = 3000
+
+
+def local_read_timeout(audio_path: str) -> float:
+    try:
+        seconds = os.path.getsize(audio_path) / BYTES_PER_AUDIO_SECOND
+    except OSError:
+        seconds = 0
+    return max(5.0, 0.3 * seconds)
+
+
+def transcribe_local(audio_path: str) -> str:
+    """Ask the local service. Raises on any problem so the caller falls back to Groq."""
+    import http.client
+    conn = http.client.HTTPConnection(LOCAL_HOST, LOCAL_PORT, timeout=LOCAL_CONNECT_TIMEOUT)
+    try:
+        conn.connect()
+        conn.sock.settimeout(local_read_timeout(audio_path))
+        body = json.dumps({"path": os.path.abspath(audio_path)}, ensure_ascii=False).encode("utf-8")
+        conn.request("POST", "/transcribe", body=body,
+                     headers={"Content-Type": "application/json; charset=utf-8"})
+        resp = conn.getresponse()
+        data = json.loads(resp.read().decode("utf-8"))
+    finally:
+        conn.close()
+    if resp.status != 200:
+        raise RuntimeError("local asr %s: %s" % (resp.status, data.get("error")))
+    text = (data.get("text") or "").strip()
+    if not text:
+        raise RuntimeError("local asr returned empty text")
+    return text
+
+
+def log_engine(action: str, details: str):
+    try:
+        import sqlite3
+        conn = sqlite3.connect("D:/Kai/kai.db", timeout=2)
+        conn.execute("INSERT INTO action_log (agent, action, details) VALUES ('transcribe', ?, ?)",
+                     (action, details))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass  # logging must never break a transcription
+
+
 def transcribe(audio_path: str) -> str:
+    """Local Hebrew model first; Groq on any failure. Same return value either way."""
+    import time
+    name = os.path.basename(audio_path)
+    t = time.time()
+    try:
+        text = apply_corrections(transcribe_local(audio_path))
+        log_engine("asr_local", "%s %.2fs" % (name, time.time() - t))
+        return text
+    except Exception as e:
+        reason = "%s: %s" % (type(e).__name__, e)
+    t = time.time()
+    text = transcribe_groq(audio_path)
+    log_engine("asr_groq", "%s %.2fs (local failed: %s)" % (name, time.time() - t, reason[:200]))
+    return text
+
+
+def transcribe_groq(audio_path: str) -> str:
     result = subprocess.run(
         [
             "curl", "-s", "-X", "POST", GROQ_URL,
