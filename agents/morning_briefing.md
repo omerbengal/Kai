@@ -305,6 +305,8 @@ Use `google-calendar` MCP to list all events for today (Jerusalem date). Format 
 `• HH:MM — {summary}`
 
 **STRICT rules:**
+- ❌ Skip any event Omer declined: an `attendees` entry with `self: true` and `responseStatus: "declined"`
+- An event that started on an earlier day and is still running shows no time: `• נמשך — {summary}`
 - ✅ Display: `summary` (event title) and `description` if present (append as a short second line, e.g. `   {description}`)
 - ❌ Do NOT include: `organizer.displayName` (often a stale/typo'd Apple ID), `attendees`, `location`
 
@@ -378,6 +380,9 @@ Build the Telegram message **in Hebrew**. **Omit any section that has no content
 📋 משימות להיום
 • [P{priority}] {title} ({domain})
 • [P{priority}] {title} ← {N} ימים באיחור!
+
+🔜 תזכורות למחר ← סקשן נפרד, לעולם לא בתוך "תזכורות היום"
+• HH:MM — message
 
 ⚠️ בעדיפות גבוהה — קרוב
 • [P{priority}] {title} — בעוד {N} ימים

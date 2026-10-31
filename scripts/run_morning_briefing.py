@@ -365,14 +365,23 @@ def _fetch_calendar_today() -> list[dict]:
             orderBy="startTime",
             maxResults=50,
         ).execute()
-        return resp.get("items", [])
+        return _drop_declined(resp.get("items", []))
     except Exception as e:
         _log("calendar", f"error: {e}")
         return []
 
 
+def _drop_declined(events: list[dict]) -> list[dict]:
+    """Events Omer declined stay on Google Calendar but do not belong in the briefing."""
+    def declined(ev: dict) -> bool:
+        return any(a.get("self") and a.get("responseStatus") == "declined"
+                   for a in ev.get("attendees") or [])
+    return [ev for ev in events if not declined(ev)]
+
+
 def _format_calendar(events: list[dict]) -> list[str]:
     lines = []
+    today_iso = datetime.now(JLM).date().isoformat()
     for ev in events:
         summary = ev.get("summary", "(ללא כותרת)")
         start = ev.get("start", {})
@@ -381,7 +390,13 @@ def _format_calendar(events: list[dict]) -> list[str]:
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
             dt_local = dt.astimezone(JLM)
-            lines.append(f"• {dt_local.strftime('%H:%M')} - {summary}")
+            # Started on an earlier day: its start time says nothing about today.
+            if dt_local.date().isoformat() < today_iso:
+                lines.append(f"• נמשך - {summary}")
+            else:
+                lines.append(f"• {dt_local.strftime('%H:%M')} - {summary}")
+        elif start.get("date", today_iso) < today_iso:
+            lines.append(f"• נמשך - {summary}")
         else:
             lines.append(f"• כל היום - {summary}")
     return lines
@@ -649,12 +664,14 @@ def _compose(parts: dict[str, Any]) -> str:
         L.extend(parts["cal_lines"])
         L.append("")
 
+    today_iso = datetime.now(JLM).date().isoformat()
     rems = parts.get("reminders") or []
-    if rems:
-        L.append("⏰ תזכורות")
-        today_iso = datetime.now(JLM).date().isoformat()
-        for r in rems:
-            tag = "" if r["date"] == today_iso else " (מחר)"
+    rems_today = [r for r in rems if r["date"] <= today_iso]  # includes overdue ones still pending
+    rems_tomorrow = [r for r in rems if r["date"] > today_iso]
+    if rems_today:
+        L.append("⏰ תזכורות היום")
+        for r in rems_today:
+            tag = " (באיחור)" if r["date"] < today_iso else ""
             L.append(f"• {r['time']} - {r['message']}{tag}")
         L.append("")
 
@@ -667,6 +684,13 @@ def _compose(parts: dict[str, Any]) -> str:
             L.append(f"• [P{t['priority']}]{tm} {t['title']}{dom}")
         for t in overdue:
             L.append(f"• [P{t['priority']}] {t['title']} - {t['days']} ימים באיחור")
+        L.append("")
+
+    # After everything that is about today, so a tomorrow item cannot be read as today's.
+    if rems_tomorrow:
+        L.append("🔜 תזכורות למחר")
+        for r in rems_tomorrow:
+            L.append(f"• {r['time']} - {r['message']}")
         L.append("")
 
     hp = parts.get("high_pri_upcoming") or []

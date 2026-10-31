@@ -30,8 +30,8 @@ message.
 
 ## Features
 
-- **Telegram in, text or voice.** Voice notes are transcribed with Whisper; Kai answers in the
-  language it was written to.
+- **Telegram in, text or voice.** Voice notes are transcribed locally by a Hebrew Whisper model on
+  the GPU, with Groq as an automatic fallback; Kai answers in the language it was written to.
 - **Tasks and reminders.** Priorities, due dates and recurrence. A reminder repeats every 5 minutes
   until it is acknowledged, and a 👍 reaction on it marks it done.
 - **WhatsApp on Omer's behalf.** Kai writes the message the way Omer would write it to that person.
@@ -88,7 +88,7 @@ Full diagram and design reasons: [ARCHITECTURE.md](ARCHITECTURE.md).
 | Data | SQLite (`schema.sql`), all times in UTC, converted through `scripts/local_tz.py` |
 | Messaging | Telegram Bot API; WhatsApp via [lharries/whatsapp-mcp](https://github.com/lharries/whatsapp-mcp) (Go bridge) |
 | Google | Calendar and Gmail APIs (OAuth) |
-| Speech | Whisper through Groq; Gemini Live for the voice proof of concept (FastAPI server) |
+| Speech | Local Hebrew Whisper ([ivrit.ai](https://huggingface.co/ivrit-ai/whisper-large-v3-turbo-ct2) turbo fine-tune on faster-whisper, GPU), Groq `whisper-large-v3` as automatic fallback; Gemini Live for the voice proof of concept (FastAPI server) |
 | Scheduling | Windows Task Scheduler |
 | Tests | pytest (`tests/`, `voice/test_tools.py`) |
 
@@ -102,6 +102,7 @@ Full diagram and design reasons: [ARCHITECTURE.md](ARCHITECTURE.md).
 | `agents/principles.md` | The behavioural principles and the 3-question check |
 | `scripts/fast/` | Deterministic single-operation scripts (reminders, tasks, calendar, WhatsApp) |
 | `scripts/typing_lease.py` | The typing indicator as a lease renewed by hooks (investigation 043) |
+| `scripts/transcribe.py`, `scripts/asr_server.py` | Voice-note transcription: the local Hebrew service first, Groq on any failure |
 | `scripts/patch_telegram_plugin.py` | Patches the Telegram plugin to expose reply-to and reaction events |
 | `scripts/run_morning_briefing.py`, `scripts/heartbeat.py` | Standalone scheduled jobs |
 | `scripts/local_tz.py`, `scripts/travel_mode.py` | Local-time handling, including abroad |
@@ -126,7 +127,7 @@ setup. In short:
    |----------|----------|
    | `KAI_TELEGRAM_BOT_TOKEN` | Telegram Bot API |
    | `KAI_TELEGRAM_CHAT_ID` | The one chat Kai talks to |
-   | `GROQ_API_KEY` | Whisper transcription, small LLM calls |
+   | `GROQ_API_KEY` | Whisper fallback for voice notes and TikTok videos, small LLM calls |
    | `SUPADATA_API_KEY` | TikTok transcripts |
    | `ISRAEL_RAIL_API_KEY` | Train search |
 
