@@ -130,27 +130,95 @@ def _video_id_from_url(url: str) -> str:
     return str(abs(hash(url)))[:18]
 
 
-def _whisper_transcribe(mp4_path: str) -> str:
-    """Send an MP4 file to Groq Whisper API (curl, like transcribe.py)."""
-    log("Whisper: transcribing...")   # shared by both download paths
-    result = subprocess.run(
-        [
-            "curl", "-s", "-X", "POST", GROQ_WHISPER_URL,
-            "-H", f"Authorization: Bearer {GROQ_API_KEY}",
-            "-F", f"file=@{mp4_path};type=video/mp4;filename=video.mp4",
-            "-F", "model=whisper-large-v3",
-            "-F", "language=he",
-        ],
-        capture_output=True,
-        timeout=90,
-    )
+# Below this duration-weighted avg_logprob a Whisper transcript is not trusted.
+# Measured 31/10/2026 on real videos: correct transcripts (English and Hebrew) scored
+# -0.05 to -0.19; English audio forced to language=he scored -0.51 and -1.02.
+MIN_WHISPER_CONFIDENCE = -0.45
+# Whisper can file short Hebrew under Yiddish, so both get the forced-Hebrew transcript.
+HEBREW_LANGUAGES = {"hebrew", "he", "yiddish"}
+
+
+class TranscriptQualityError(ValueError):
+    """Audio came back but the transcript is unusable. Stops the cascade, never cached."""
+
+
+def _whisper_call(mp4_path: str, language: str | None = None, verbose: bool = True) -> dict:
+    """One Groq Whisper call (curl, like transcribe.py). language=None = auto-detect.
+
+    verbose adds the detected language and segment scores to the response.
+    """
+    cmd = [
+        "curl", "-s", "-X", "POST", GROQ_WHISPER_URL,
+        "-H", f"Authorization: Bearer {GROQ_API_KEY}",
+        "-F", f"file=@{mp4_path};type=video/mp4;filename=video.mp4",
+        "-F", "model=whisper-large-v3",
+    ]
+    if verbose:
+        cmd += ["-F", "response_format=verbose_json"]
+    if language:
+        cmd += ["-F", f"language={language}"]
+    result = subprocess.run(cmd, capture_output=True, timeout=90)
     try:
         data = json.loads(result.stdout.decode("utf-8"))
     except Exception:
         raise ValueError(f"Whisper non-JSON response: {result.stdout[:300]!r}")
     if "error" in data:
         raise ValueError(f"Whisper error: {data['error'].get('message', data['error'])}")
-    return data.get("text", "").strip()
+    return data
+
+
+def _whisper_confidence(data: dict) -> float | None:
+    """Duration-weighted avg_logprob of the segments; None if there is nothing to score."""
+    scored = [
+        (s["avg_logprob"], s.get("end", 0) - s.get("start", 0))
+        for s in data.get("segments") or []
+        if s.get("avg_logprob") is not None
+    ]
+    total = sum(seconds for _, seconds in scored)
+    if not total:
+        return None
+    return sum(logprob * seconds for logprob, seconds in scored) / total
+
+
+def _is_trusted(data: dict) -> bool:
+    confidence = _whisper_confidence(data)
+    return confidence is None or confidence >= MIN_WHISPER_CONFIDENCE
+
+
+def _whisper_transcribe(mp4_path: str) -> str:
+    """
+    Transcribe in the video's own language.
+
+    language=he used to be hard-coded, which turned English videos into Hebrew-looking
+    nonsense that still exited 0 (31/10/2026, the Timestral video). Auto-detect now picks
+    the language and scores the audio. A Hebrew video that passes then goes through the
+    exact old request (language=he, plain response), so Hebrew output is unchanged: the
+    auto transcript matched it on 3 of 4 real videos and differed on the 4th, where even
+    identical requests vary run to run, so it is not worth changing.
+    Any other language keeps the auto transcript. If the score is too low, detection may
+    have misfired on Hebrew, so forced Hebrew is tried and the higher score wins. Refuses
+    to return a transcript that neither try can stand behind.
+    """
+    log("Whisper: transcribing...")   # shared by both download paths
+    best = _whisper_call(mp4_path)
+    detected = (best.get("language") or "").strip().lower()
+    log(f"Whisper: language={detected or '?'} confidence={_whisper_confidence(best)}")
+
+    if detected in HEBREW_LANGUAGES and _is_trusted(best):
+        best = _whisper_call(mp4_path, language="he", verbose=False)
+    elif not _is_trusted(best):
+        log("Whisper: not trusted, retrying as Hebrew")
+        hebrew = _whisper_call(mp4_path, language="he")
+        log(f"Whisper: Hebrew retry confidence={_whisper_confidence(hebrew)}")
+        if (_whisper_confidence(hebrew) or -99) >= (_whisper_confidence(best) or -99):
+            best = hebrew
+
+    if not _is_trusted(best):
+        raise TranscriptQualityError(
+            f"התמלול לא אמין (confidence {_whisper_confidence(best):.2f}), "
+            "כנראה מוזיקה או דיבור לא ברור"
+        )
+    return (best.get("text") or "").strip()
 
 
 def _playwright_whisper_fallback(canonical_url: str) -> str:
@@ -394,6 +462,8 @@ def get_transcript(tiktok_url: str) -> tuple[str, str, str]:
         log("Step C: success")
         _remember(text, "ytdlp_whisper")
         return text, "ytdlp_whisper", canonical
+    except TranscriptQualityError:
+        raise   # Playwright would fetch the same audio and get the same answer
     except Exception as e:
         err = e
         failures.append(f"yt-dlp+Whisper: {err}")
