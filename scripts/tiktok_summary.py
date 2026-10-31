@@ -7,7 +7,8 @@ Pipeline (cascade):
 2. Try Supadata API for transcript (canonical URL).
 3. On Supadata failure → yt-dlp downloads the video + Groq Whisper.
 4. If that fails too → Playwright (capture CDN MP4) + Groq Whisper.
-5. Send transcript to Groq for a Hebrew news-post (title + body, no metadata).
+5. Claude (headless) writes the Hebrew news-post from the transcript (title + body, no
+   metadata). Groq is only the fallback; stderr then says COMPOSER_FALLBACK.
 
 Usage:
     python tiktok_summary.py <tiktok_url>
@@ -34,6 +35,7 @@ import os
 import re
 import argparse
 import json
+import shutil
 import subprocess
 
 import requests
@@ -45,6 +47,21 @@ GROQ_API_KEY = os.environ.get(
     ""
 )
 GROQ_MODEL = "openai/gpt-oss-120b"
+# Composer model (31/10/2026). Measured by hand against the transcripts: gpt-oss-120b put
+# an invented or wrong fact in every post (24/24 at temperature 0.9, 21/21 at 0.3, 5/5
+# with a stricter prompt), so neither temperature nor the prompt was the main cause.
+# Haiku failed 12/24 (it misread a Hebrew time reference on all 8 posts of one video).
+# Sonnet with this prompt: 4/41 posts with a small unsupported claim, no invented number
+# or date. The number check below only sees digits, so such a claim can still get through.
+COMPOSER_CLAUDE_MODEL = "sonnet"
+COMPOSER_TIMEOUT = 150
+# Mandatory on every `claude -p` child: without them it loads the Telegram plugin, runs
+# its own poller and steals Omer's messages. No settings, no MCP servers, no tools.
+HEADLESS_ISOLATION_ARGS = [
+    "--setting-sources", "",
+    "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+    "--tools", "",
+]
 GROQ_WHISPER_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 
 CACHE_DIR = "D:/Kai/tmp"
@@ -834,8 +851,37 @@ MIN_LINES = 6
 MAX_LINES = 12
 
 
-def _violations(text: str, fmt: dict) -> list[str]:
+# The post goes out in Omer's voice, so the creator's "I tested" would be a false claim.
+CREATOR_FIRST_PERSON = re.compile(
+    r"(?<![א-ת])(?:בדקתי|הרצתי|ניסיתי|מצאתי|השתמשתי|מדדתי|הוצאתי|אימנתי|לא אימנתי|"
+    r"בעיניי|לדעתי|גם אני|גם אנחנו|אני מכין|שלי|מצידי|ממני)(?![א-ת])"
+)
+_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)*")
+
+
+def _numbers(text: str) -> set[str]:
+    # Supadata spaces out decimals and percents ("2 .7", "1 %").
+    text = re.sub(r"(?<=\d)\s+(?=[.%])", "", text)
+    return set(_NUMBER_RE.findall(text))
+
+
+def _unsupported_numbers(post: str, transcript: str) -> list[str]:
+    """Numbers in the post that are not in the transcript. List numbering does not count."""
+    body = re.sub(r"^\W*\d+[.)]", "", post, flags=re.M)
+    # The "5 דברים שכדאי לדעת" style is told to count its own points.
+    body = re.sub(r"\d+\s+דברים", "", body)
+    return sorted(_numbers(body) - _numbers(transcript))
+
+
+def _violations(text: str, fmt: dict, transcript: str = "") -> list[str]:
     problems = []
+    if transcript:
+        extra = _unsupported_numbers(text, transcript)
+        if extra:
+            problems.append(f"מספרים שלא בתמלול: {', '.join(extra)}")
+    voice = CREATOR_FIRST_PERSON.search(text)
+    if voice:
+        problems.append(f'גוף ראשון של היוצר ("{voice.group(0)}") - עבור לגוף שלישי או סביל')
     for device, n in _repeated_devices(text).items():
         problems.append(f'המילה "{device}" מופיעה {n} פעמים - מותר פעם אחת בלבד בכל הפוסט')
     if re.search(r"\?\s*\S{0,4}\s*$", text) and fmt["ending_key"] != "question":
@@ -853,6 +899,25 @@ def _violations(text: str, fmt: dict) -> list[str]:
     if first.startswith("🚀") and "🚀" not in fmt["emojis"]:
         problems.append("rocket opener")
     return problems
+
+
+def _claude_compose(messages: list[dict]) -> str:
+    """One headless Claude call. The prompt goes over stdin, because the Windows claude
+    shim does not pass multi-line arguments safely."""
+    home_cli = os.path.expanduser("~/.local/bin/claude.exe")
+    cli = home_cli if os.path.exists(home_cli) else shutil.which("claude")
+    if not cli:
+        raise ValueError("claude CLI not found")
+    result = subprocess.run(
+        [cli, "-p", "--model", COMPOSER_CLAUDE_MODEL, *HEADLESS_ISOLATION_ARGS],
+        input="\n\n".join(m["content"] for m in messages).encode("utf-8"),
+        capture_output=True,
+        timeout=COMPOSER_TIMEOUT,
+    )
+    text = result.stdout.decode("utf-8", errors="replace").strip()
+    if result.returncode != 0 or not text:
+        raise ValueError(f"claude exit {result.returncode}: {result.stderr[-200:]!r}")
+    return text
 
 
 def summarize_hebrew(transcript: str, oembed: dict | None = None, fmt: dict | None = None) -> str:
@@ -916,7 +981,14 @@ def summarize_hebrew(transcript: str, oembed: dict | None = None, fmt: dict | No
         "נאמר יום בלי חודש - לא מוסיפים חודש. לא מוסיפים מסקנה, השפעה, דוגמה, מחיר, סיבה או חוויה אישית שלא נאמרו. "
         "לא ברור מה נאמר בתמלול - משמיטים את הפרט ולא מנחשים.\n"
         "- אורך הוא יעד, לא סיבה להמציא: עדיף פוסט קצר יותר מאשר משפט אחד שלא נאמר.\n"
-        "- הפוסט נכתב בקול של עומר, לא של היוצר: אל תעתיק גוף ראשון של היוצר (\"קיבלתי את השאלה\", \"אני שמח\").\n"
+        "- הפוסט נכתב בקול של עומר, לא של היוצר, ועומר לא עשה שום דבר שמסופר בתמלול: מה שהיוצר עשה, בדק או חושב "
+        "נכתב בגוף שלישי או סביל (\"הריצו אותו על לפטופ\", \"לפי הבדיקה\"), לעולם לא \"בדקתי\", \"שלי\", \"בעיניי\", \"גם אני\". "
+        "הבטחות של היוצר לעתיד (סקירה בדרך, תגיבו ואשלח) לא נכנסות.\n"
+        "- מילה משובשת בתמלול שאי אפשר להבין בוודאות - משמיטים את כל המשפט, ולא כותבים במקומה ניחוש או ביטוי דומה. "
+        "אבל שמות נכתבים נכון: ארטיפישיין אנליסיס = Artificial Analysis.\n"
+        "- נושא הפוסט חייב להיות מובן: השורה הראשונה נוקבת בשם המוצר או המודל כפי שנאמר בתמלול, גם אם הוא לא מוכר לך. "
+        "לא כותבים \"המודל\" או \"העדכון\" בלי שם. השמטה של מילה משובשת לא חלה על שם הנושא.\n"
+        "- מילות הסתייגות נשארות: \"רוב\", \"בערך\", \"כמעט\", \"לפי\". \"ברוב הדברים עובר את X\" לא הופך ל\"עובר את X\".\n"
         "- אסור תוויות עם נקודתיים כמו \"עובדה מפתיעה:\" או \"השורה התחתונה:\" (חוץ מ-\"אמ;לק:\" כשהמבנה מבקש).\n"
         "- אל תכתוב \"הסרטון מסביר\" / \"בקליפ\" / \"לפי הסרטון\", ואל תזכיר יוצר, פלטפורמה או קישור.\n"
         "- אל תסיים ב\"בקיצור\" / \"לסיכום\" / \"המסר הוא\", ואל תפתח ב\"היי חברים\".\n"
@@ -952,6 +1024,10 @@ def summarize_hebrew(transcript: str, oembed: dict | None = None, fmt: dict | No
         ]
         if extra:
             messages.append({"role": "user", "content": extra})
+        try:
+            return _claude_compose(messages)
+        except Exception as e:
+            log(f"COMPOSER_FALLBACK: Claude failed ({str(e)[:200]}); using Groq")
         import time
         for attempt in range(3):
             resp = requests.post(
@@ -981,15 +1057,15 @@ def summarize_hebrew(transcript: str, oembed: dict | None = None, fmt: dict | No
         return resp.json()["choices"][0]["message"]["content"].strip()
 
     post = clean_post(_call(), fmt)
-    problems = _violations(post, fmt)
+    problems = _violations(post, fmt, transcript)
     if problems:
         log(f"Format violations ({', '.join(problems)}); retrying once")
         try:
             retry = clean_post(_call(
-                "הפוסט הקודם הפר את הפורמט שנבחר (" + ", ".join(problems) +
+                "הפוסט הקודם:\n" + post + "\n\nהוא הפר את הכללים (" + ", ".join(problems) +
                 "). כתוב אותו מחדש לפי הפורמט בדיוק, בלי להוסיף שום עובדה שלא בתמלול."
             ), fmt)
-            if retry and len(_violations(retry, fmt)) < len(problems):
+            if retry and len(_violations(retry, fmt, transcript)) < len(problems):
                 post = retry
         except Exception as e:
             log(f"retry failed ({e}); keeping first version")

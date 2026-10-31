@@ -74,6 +74,7 @@ D:/Kai/.venv/Scripts/python.exe D:/Kai/scripts/tiktok_summary.py "{{ TIKTOK_URL 
 - **stdout** → the composed news-post (title + body). Capture it verbatim.
 - **stderr** → progress logs and any errors. Do **not** include in the final reply.
 - **exit code 0** → success; non-zero → failure.
+- **`COMPOSER_FALLBACK` in stderr** → Claude could not write the post and Groq did, and Groq invents facts (measured 31/10/2026). Do not send it as is: check it against `--raw` output, or tell Omer in the reply that this post was not checked.
 
 If the script exits non-zero or stdout is empty:
 1. Read stderr to see what failed (Supadata 404, Playwright timeout, Whisper error, etc.).
