@@ -412,3 +412,8 @@ def run_heartbeat():
 
 if __name__ == "__main__":
     run_heartbeat()
+    try:
+        import stale_ack
+        stale_ack.fix_stale()
+    except Exception as e:  # a cosmetic safety net must never fail the heartbeat
+        print(f"stale_ack error: {e}")

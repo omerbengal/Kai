@@ -15,6 +15,10 @@ Usage:
     python D:/Kai/scripts/dispatch_start.py --ack_id ID --title "<summary>" --pin
         # an ACK already exists (voice "🎤 מתמלל..." / Option D turned worker): edit it to the
         # titled text instead of sending a new one, log it, pin it. Prints ACK_MSG_ID=<ID>.
+    python D:/Kai/scripts/dispatch_start.py --ack_id ID --title "<summary>" --queued --pin
+        # follow-up by SendMessage to an agent that already exists: nothing is being spawned, and a busy
+        # agent reads the message only at its next tool round (15 min in the worst case), so the ACK says
+        # "🔄 <summary> — 📋 בתור אצל ה-agent שכבר עובד על זה" instead of "מייצר agent" (Omer msg 21171).
     python D:/Kai/scripts/dispatch_start.py --no-ack          # trivial / voice: pending + context only
 
 Output (stdout):
@@ -115,13 +119,16 @@ def main():
     p.add_argument("--context", type=int, default=20)
     p.add_argument("--title", default=None,
                    help='worker path: ACK text becomes "🔄 <title> — ⏳ מייצר agent..." and is logged to ack_log')
+    p.add_argument("--queued", action="store_true",
+                   help='with --title: follow-up to an existing agent, ACK says "בתור" and never "מייצר agent"')
     p.add_argument("--pin", action="store_true", help="pin the ACK (worker-spawn points ONLY)")
     p.add_argument("--ack_id", default=None, help="edit this existing ACK instead of sending a new one")
     p.add_argument("--no-context", action="store_true", help="skip PENDING/CONTEXT output (ACK-only call)")
     args = p.parse_args()
 
     if args.title:
-        args.text = f"🔄 {args.title} — ⏳ מייצר agent..."
+        status = "📋 בתור אצל ה-agent שכבר עובד על זה" if args.queued else "⏳ מייצר agent..."
+        args.text = f"🔄 {args.title} — {status}"
 
     mid = None
     if args.no_ack:

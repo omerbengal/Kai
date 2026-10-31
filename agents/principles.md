@@ -88,6 +88,7 @@ Any "no" → fix before sending. If Omer corrected you twice in a row on anythin
 עברית: עומר רואה רק טלגרם - עדכון חי, תמיד תשובה סופית, וסוגרים את הקצוות.
 - Why: silence looks like failure; he cannot see the terminal.
 - Edit the ACK before each step; the last action is always a `reply`; no silent file edits ("✅ what changed").
+- A status line states what is really happening now, never what the routine path would be doing: "מייצר agent" while the message waits in a busy agent's queue is a false status.
 - Finishing work a reminder/task tracked → offer (buttons) to mark it done.
 - Money or anything else at risk right now: warnings before the bad event ("מתקרב לסטופ") are the core of the
   watch, never "chatter" to trim; "less noise" removes repeats, not early warnings.
