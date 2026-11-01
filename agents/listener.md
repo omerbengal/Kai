@@ -40,7 +40,7 @@ The rules below describe the manual ACK; when rule 0 gave you an AUTO_ACK_MSG_ID
      The ACK reads "🔄 <summary> — 📋 בתור אצל ה-agent שכבר עובד על זה".
    - `Resuming agent ...` = it had finished and restarts now, so nobody was working and "בתור" would be false (Omer msg 21373):
      `python D:/Kai/scripts/dispatch_start.py --ack_id ACK_MSG_ID --title "<1-line summary>" --resumed --pin --no-context`
-     The ACK reads "🔄 <summary> — ⚙️ מעיר agent קיים שכבר מכיר את הנושא".
+     The ACK reads "🔄 <summary> — ⚙️ מתחיל לעבוד".
    - Anything else (agent not found, an error) = nothing is running: spawn with `Agent` as in rule 4.
    Why the wording matters: a busy agent reads its queue only at its next tool round. Measured 31/10/2026 from transcripts: fresh `Agent` spawns reach their first edit in 18s median, 55s max (178 spawns); `SendMessage` to a busy agent took up to 15 min, and 6 of that day's follow-ups were folded into another task and never edited at all (21165 stayed on "מייצר agent" for 9 min until a manual edit). A resumed agent starts in ~5s, so this call may land after its first edit and overwrite it for one step; "ממשיך" stays true, and its next edit replaces it.
 

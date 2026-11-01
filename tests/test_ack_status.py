@@ -47,7 +47,7 @@ def test_resumed_never_claims_a_working_agent(monkeypatch):
     """SendMessage answered "Resuming agent": it had finished, so nobody was working (Omer msg 21373)."""
     c = run_main(monkeypatch, ["--ack_id", "5", "--title", "בודק", "--resumed", "--pin", "--no-context"])
     text = c["edit"][0][1]
-    assert text == "🔄 בודק — ⚙️ מעיר agent קיים שכבר מכיר את הנושא"
+    assert text == "🔄 בודק — ⚙️ מתחיל לעבוד"
     assert "בתור" not in text and "עובד" not in text and "מייצר" not in text
     assert c["log"] == [(5, "sent", text)]
     assert c["pin"] == [5]
@@ -103,7 +103,7 @@ def test_ack_moved_on_or_deleted_untouched(tmp_path):
 def test_old_rows_and_other_texts_untouched(tmp_path):
     rows = [(7, "sent", SPAWN, ts(4000)), (8, "sent", "voice: x — מייצר agent", ts(300)),
             (9, "sent", "🔄 בודק — 📋 בתור אצל ה-agent שכבר עובד על זה", ts(300)),
-            (10, "sent", "🔄 בודק — ⚙️ מעיר agent קיים שכבר מכיר את הנושא", ts(300))]
+            (10, "sent", "🔄 בודק — ⚙️ מתחיל לעבוד", ts(300))]
     assert run_check(tmp_path, rows)[1] == []
 
 
