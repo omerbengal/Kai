@@ -33,7 +33,9 @@ def send_telegram_error(chat_id: str, text: str) -> None:
         url = f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage'
         payload = json.dumps({'chat_id': chat_id, 'text': text}).encode()
         req = urllib.request.Request(url, payload, {'Content-Type': 'application/json'})
-        urllib.request.urlopen(req, timeout=10)
+        resp = urllib.request.urlopen(req, timeout=10)
+        import tg_log  # keeps it in `messages`
+        tg_log.save_response(resp, text)
     except Exception as e:
         print(f'[handle_reaction] failed to send error to Telegram: {e}', file=sys.stderr)
 

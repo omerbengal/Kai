@@ -107,14 +107,17 @@ def tg_reply(chat_id, text, reply_to=None, linkify=False):
             raise last_err
     except Exception as e:
         # Last-resort: send plain ASCII error so Omer sees something
-        err_payload = json.dumps({"chat_id": chat_id, "text": f"fast-script error: {e}"}).encode()
+        err_text = f"fast-script error: {e}"
+        err_payload = json.dumps({"chat_id": chat_id, "text": err_text}).encode()
         err_req = urllib.request.Request(
             f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
             data=err_payload,
             headers={"Content-Type": "application/json"}
         )
         try:
-            urllib.request.urlopen(err_req, timeout=10)
+            err_resp = urllib.request.urlopen(err_req, timeout=10)
+            import tg_log  # keeps it in `messages`
+            tg_log.save_response(err_resp, err_text)
         except Exception:
             pass
         return None

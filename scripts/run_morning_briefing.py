@@ -742,7 +742,13 @@ def _telegram_send(text: str) -> dict:
     }).encode("utf-8")
     req = urllib.request.Request(url, data=payload, method="POST")
     with urllib.request.urlopen(req, timeout=20) as r:
-        return json.loads(r.read())
+        resp = json.loads(r.read())
+    try:
+        import tg_log  # keeps it in `messages`
+        tg_log.save_response(resp, text)
+    except Exception as e:
+        _log("send", f"messages row not saved: {e}")
+    return resp
 
 
 # --- Public entry point ------------------------------------------------------

@@ -57,7 +57,9 @@ def send_telegram(text: str):
     try:
         encoded = urllib.parse.quote(text)
         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage?chat_id={CHAT_ID}&text={encoded}"
-        urllib.request.urlopen(url, timeout=10)
+        resp = urllib.request.urlopen(url, timeout=10)
+        import tg_log  # keeps it in `messages`
+        tg_log.save_response(resp, text)
     except Exception:
         pass  # Silent — watchdog must never crash on Telegram failure
 

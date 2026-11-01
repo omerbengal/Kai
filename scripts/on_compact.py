@@ -30,7 +30,9 @@ def send_telegram(text: str) -> None:
     payload = json.dumps({"chat_id": CHAT_ID, "text": text}).encode()
     req = urllib.request.Request(url, payload, {"Content-Type": "application/json"})
     try:
-        urllib.request.urlopen(req, timeout=10)
+        resp = urllib.request.urlopen(req, timeout=10)
+        import tg_log  # keeps it in `messages`
+        tg_log.save_response(resp, text)
     except Exception as e:
         print(f"[on_compact] Telegram send failed: {e}", file=sys.stderr)
 

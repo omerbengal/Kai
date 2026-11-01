@@ -46,9 +46,11 @@ def notify(text):
     """Send a Telegram message via direct Bot API (sendMessage only)."""
     try:
         data = urllib.parse.urlencode({"chat_id": CHAT_ID, "text": text}).encode()
-        urllib.request.urlopen(
+        resp = urllib.request.urlopen(
             f"https://api.telegram.org/bot{TOKEN}/sendMessage", data=data, timeout=10
         )
+        import tg_log  # keeps it in `messages`
+        tg_log.save_response(resp, text)
     except Exception as e:
         rlog(f"notify failed: {e}")
 

@@ -107,7 +107,7 @@ if not is_post_compact:
     _minutes = _now.hour * 60 + _now.minute
     quiet = 2 * 60 <= _minutes < 5 * 60 + 30
     try:
-        urllib.request.urlopen(urllib.request.Request(
+        _resp = urllib.request.urlopen(urllib.request.Request(
             f"{BASE_URL}/sendMessage",
             json.dumps({
                 "chat_id": CHAT_ID,
@@ -116,6 +116,8 @@ if not is_post_compact:
             }).encode("utf-8"),
             {"Content-Type": "application/json"}
         ), timeout=10)
+        import tg_log  # keeps it in `messages`
+        tg_log.save_response(_resp, "קלוד עלה ✅")
     except Exception as e:
         import sys
         print(f"[session_start_cleanup] ERROR sending startup message: {e}", file=sys.stderr)

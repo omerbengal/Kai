@@ -180,7 +180,9 @@ def expire_check(now_utc=None, send=True, path=None):
             data = json.dumps({"chat_id": CHAT_ID, "text": text}, ensure_ascii=False).encode("utf-8")
             req = urllib.request.Request(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", data,
                                          {"Content-Type": "application/json; charset=utf-8"})
-            urllib.request.urlopen(req, timeout=10)
+            resp = urllib.request.urlopen(req, timeout=10)
+            import tg_log  # keeps it in `messages`
+            tg_log.save_response(resp, text)
         except Exception:
             pass
     return True

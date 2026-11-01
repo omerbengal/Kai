@@ -580,10 +580,13 @@ def main():
         print(msg, file=sys.stderr)
         try:
             import urllib.request, urllib.parse
-            urllib.request.urlopen(
+            alert = "⚠️ patch_telegram_plugin: לא נמצא server.ts באף אחד מהנתיבים. הריאקציות לא יעבדו."
+            resp = urllib.request.urlopen(
                 f'https://api.telegram.org/bot{os.environ["KAI_TELEGRAM_BOT_TOKEN"]}/sendMessage?'
-                f'chat_id={os.environ["KAI_TELEGRAM_CHAT_ID"]}&text={urllib.parse.quote("⚠️ patch_telegram_plugin: לא נמצא server.ts באף אחד מהנתיבים. הריאקציות לא יעבדו.")}',
+                f'chat_id={os.environ["KAI_TELEGRAM_CHAT_ID"]}&text={urllib.parse.quote(alert)}',
                 timeout=5)
+            import tg_log  # keeps it in `messages`
+            tg_log.save_response(resp, alert)
         except Exception:
             pass
         return

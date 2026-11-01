@@ -38,7 +38,9 @@ def send_fallback(original_msg_id):
     }).encode()
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
     try:
-        urllib.request.urlopen(req, timeout=10)
+        resp = urllib.request.urlopen(req, timeout=10)
+        import tg_log  # keeps it in `messages`
+        tg_log.save_response(resp, text, reply_to=original_msg_id)
     except Exception as e:
         print(f"watchdog: failed to send fallback: {e}", file=sys.stderr)
 

@@ -67,6 +67,8 @@ mcp__plugin_telegram_telegram__reply(chat_id="${KAI_TELEGRAM_CHAT_ID}", text="..
 ### Worker update pattern
 Workers **edit ACK_MSG_ID** before each step — not new messages. ACK_MSG_ID is the dispatcher's "🔄 ... — ⏳ מייצר agent..." message. The worker's very first action is to edit it to "🔄 ... — ⚙️ agent מוכן, מתחיל...". All subsequent progress updates also edit that same message. Only the final result is sent as a new reply. This way Omer sees one live-updating status message, plus the final result.
 
+**Resume rule (Omer, 01/11/2026):** the dispatcher resumes an agent with `SendMessage` only for the same subject, and only when that agent's last task notification shows `subagent_tokens` under 300k. Otherwise it spawns a fresh agent with a short task block, because a resumed agent keeps its whole context and every task adds to it (one agent reached 520k). Full rule: `agents/listener.md` → Step shortening rule 5.
+
 "מייצר agent" is said only when an `Agent` call really follows. A follow-up sent by `SendMessage` to an agent that already exists gets its ACK in the next call, chosen by the `SendMessage` result (only that result shows the agent's state): `Message queued for delivery` = busy, `dispatch_start.py --ack_id ID --title "..." --queued --pin --no-context`, ACK reads "📋 בתור אצל ה-agent שכבר עובד על זה" (a busy agent reads its queue only at the next tool round, up to 15 min measured on 31/10/2026, while fresh spawns are 55s at worst); `Resuming agent` = it had finished and restarts now, same call with `--resumed`, ACK reads "⚙️ מתחיל לעבוד". Safety net: `scripts/stale_ack.py`, run by the heartbeat, edits an ACK still on "מייצר agent" after 2 minutes, only if no transcript shows an edit on it (`ack_log` misses many worker edits, so it cannot decide alone). Tests: `tests/test_ack_status.py`.
 
 The ACK is **pinned only when a worker is actually spawned** (`scripts/tg_pin.py` → `pin_ack` / `unpin_ack`, registry at `tmp/pinned_acks.json`; the pin call sits at the worker-spawn points in `agents/listener.md` Step 4 / Options E, G / Investigation Mode) and unpinned right before it is deleted, so the live status of a long task stays in the pinned banner even when Omer scrolls to other conversations. The initial "🔄 ⏳" ACK and the "🎤 מתמלל... ⏳" voice ACK are **never pinned at send time** (Omer's request, 28/09/2026), so short paths (A/B, C, C2, D, inline) do not flash a pin. Unpin on a non-pinned ACK is a harmless no-op, so every deletion point keeps its unpin line. Fast scripts (`scripts/fast/_base.py`) never pin either (removed 28/09/2026); TikTok workers do pin.
@@ -80,6 +82,7 @@ See `agents/listener.md` → Mandatory Telegram Update Protocol for the full sta
 All Telegram messages are auto-saved to `messages` table via hooks:
 - **UserPromptSubmit** → `scripts/save_telegram_message.py` (incoming)
 - **PostToolUse** → same script (outgoing, on `reply` tool calls)
+- **Scripts that call the Bot API directly** are invisible to those hooks: they save through `scripts/tg_log.py` (`save_response` / `save_outgoing`) right after the send, and `tests/test_tg_log.py` fails on any script that sends without saving. Its rows never raise; a failed save goes to `tmp/tg_log_failures.log`.
 
 Query history before claiming "I don't have message history."
 
