@@ -21,7 +21,7 @@ Usage:
         # "🔄 <summary> — 📋 בתור אצל ה-agent שכבר עובד על זה" instead of "מייצר agent" (Omer msg 21171).
     python D:/Kai/scripts/dispatch_start.py --ack_id ID --title "<summary>" --resumed --pin
         # SendMessage answered "Resuming agent": it had finished and restarts now, so nobody was working
-        # and "בתור" would be false: "🔄 <summary> — ⚙️ ממשיך עם ה-agent מהמשימה הקודמת" (Omer msg 21373).
+        # and "בתור" would be false: "🔄 <summary> — ⚙️ מעיר agent קיים שכבר מכיר את הנושא" (Omer msg 21373).
         # Only the SendMessage result tells the two apart, so this call comes after it, never beside it.
     python D:/Kai/scripts/dispatch_start.py --no-ack          # trivial / voice: pending + context only
 
@@ -137,7 +137,7 @@ def main():
         if args.queued:
             status = "📋 בתור אצל ה-agent שכבר עובד על זה"
         elif args.resumed:
-            status = "⚙️ ממשיך עם ה-agent מהמשימה הקודמת"
+            status = "⚙️ מעיר agent קיים שכבר מכיר את הנושא"
         else:
             status = "⏳ מייצר agent..."
         args.text = f"🔄 {args.title} — {status}"
