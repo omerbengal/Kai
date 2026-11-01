@@ -34,9 +34,15 @@ The rules below describe the manual ACK; when rule 0 gave you an AUTO_ACK_MSG_ID
    - **Turn 2** - `Agent(subagent_type="kai-worker", prompt=<short task block, Step 4>)`. Never paste worker instructions or the last-20 context: the agent file holds the protocol and the worker loads context itself.
    - **Turn 3** (off the critical path) - `python D:/Kai/scripts/dispatch_map.py <agentId> ACK_MSG_ID ORIGINAL_MSG_ID`.
    If the opening call's output changes the plan (PENDING shows it answers a pending question handled inline, or the request turns out to be Option C/D), unpin the ACK and continue on that path - rare, and the pin is harmless.
-5. **Follow-up to an agent that already exists = `--queued`, never plain `--title`.** When you send the task with `SendMessage` instead of `Agent` (same subject, one writer on the same files), nothing is being spawned, so the ACK must not say "מייצר agent". In the SAME parallel block as the `SendMessage`:
-   `python D:/Kai/scripts/dispatch_start.py --ack_id ACK_MSG_ID --title "<1-line summary>" --queued --pin --no-context`
-   The ACK then reads "🔄 <summary> — 📋 בתור אצל ה-agent שכבר עובד על זה". Why: a busy agent reads its queue only at its next tool round. Measured 31/10/2026 from transcripts: fresh `Agent` spawns reach their first edit in 18s median, 55s max (178 spawns); `SendMessage` to a busy agent took up to 15 min, and 6 of that day's follow-ups were folded into another task and never edited at all (21165 stayed on "מייצר agent" for 9 min until a manual edit). Use `--queued` also when the agent looks idle: it resumes in ~5s and replaces the text anyway. The `SendMessage` body is the short task block of Step 4, with ACK_MSG_ID and ORIGINAL_MSG_ID.
+5. **Follow-up to an agent that already exists = the ACK follows the `SendMessage` RESULT, never plain `--title`.** When you send the task with `SendMessage` instead of `Agent` (same subject, one writer on the same files), nothing is being spawned, so the ACK must not say "מייצר agent". You cannot know the agent's state before the call, so send `SendMessage` FIRST (the body is the short task block of Step 4, with ACK_MSG_ID and ORIGINAL_MSG_ID), and make this your very next call, choosing by what it returned:
+   - `Message queued for delivery ...` = the agent is busy:
+     `python D:/Kai/scripts/dispatch_start.py --ack_id ACK_MSG_ID --title "<1-line summary>" --queued --pin --no-context`
+     The ACK reads "🔄 <summary> — 📋 בתור אצל ה-agent שכבר עובד על זה".
+   - `Resuming agent ...` = it had finished and restarts now, so nobody was working and "בתור" would be false (Omer msg 21373):
+     `python D:/Kai/scripts/dispatch_start.py --ack_id ACK_MSG_ID --title "<1-line summary>" --resumed --pin --no-context`
+     The ACK reads "🔄 <summary> — ⚙️ ממשיך עם ה-agent מהמשימה הקודמת".
+   - Anything else (agent not found, an error) = nothing is running: spawn with `Agent` as in rule 4.
+   Why the wording matters: a busy agent reads its queue only at its next tool round. Measured 31/10/2026 from transcripts: fresh `Agent` spawns reach their first edit in 18s median, 55s max (178 spawns); `SendMessage` to a busy agent took up to 15 min, and 6 of that day's follow-ups were folded into another task and never edited at all (21165 stayed on "מייצר agent" for 9 min until a manual edit). A resumed agent starts in ~5s, so this call may land after its first edit and overwrite it for one step; "ממשיך" stays true, and its next edit replaces it.
 
 When unsure whether a message is trivial, it is NOT trivial: send the ACK.
 
@@ -673,7 +679,7 @@ Examples of the summary text:
 - `"🔄 בודק ג'ימייל — ⏳ מייצר agent..."`
 - `"🔄 מעדכן איש קשר — ⏳ מייצר agent..."`
 
-The `⏳ מייצר agent...` suffix tells Omer that spawning is in progress, so it is used ONLY when an `Agent` call really follows. A `SendMessage` follow-up uses `--queued` (Step shortening rule 5). The worker will replace it with its own status as soon as it starts. Safety net: `scripts/stale_ack.py` (from heartbeat, every minute) changes an ACK still on that text after 2 minutes to "📋 מחכה ל-agent, הוא עוד לא התחיל", only if no transcript shows an edit on it.
+The `⏳ מייצר agent...` suffix tells Omer that spawning is in progress, so it is used ONLY when an `Agent` call really follows. A `SendMessage` follow-up uses `--queued` or `--resumed`, chosen by the `SendMessage` result (Step shortening rule 5). The worker will replace it with its own status as soon as it starts. Safety net: `scripts/stale_ack.py` (from heartbeat, every minute) changes an ACK still on that text after 2 minutes to "📋 מחכה ל-agent, הוא עוד לא התחיל", only if no transcript shows an edit on it.
 
 `--title` (with or without `--ack_id`) logs the ack_log "sent" row itself - no separate `log_ack.py` call.
 

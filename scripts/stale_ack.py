@@ -2,8 +2,8 @@
 """
 Safety net for an ACK left on "⏳ מייצר agent..." with no agent behind it (Omer msg 21171, 31/10/2026).
 
-Called once a minute from heartbeat.py. The normal cure is `dispatch_start.py --queued` on a follow-up to a
-running worker; this only catches what slips past it (a dispatcher that used plain --title, a failed spawn).
+Called once a minute from heartbeat.py. The normal cure is `dispatch_start.py --queued` / `--resumed` on a
+follow-up to an existing worker; this only catches what slips past it (a dispatcher that used plain --title, a failed spawn).
 
 Fresh spawns reach their first edit in 55s at worst (178 spawns measured), so 2 minutes means nobody started.
 ack_log alone cannot prove that, because workers often skip log_ack, so an ACK is edited only when the

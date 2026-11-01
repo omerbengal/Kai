@@ -5,6 +5,8 @@ import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 sys.path.insert(0, "D:/Kai/scripts")
 import dispatch_start  # noqa: E402
 import stale_ack  # noqa: E402
@@ -39,6 +41,21 @@ def test_queued_never_says_spawning(monkeypatch):
     assert "מייצר" not in text
     assert c["log"] == [(5, "sent", text)]
     assert c["pin"] == [5]
+
+
+def test_resumed_never_claims_a_working_agent(monkeypatch):
+    """SendMessage answered "Resuming agent": it had finished, so nobody was working (Omer msg 21373)."""
+    c = run_main(monkeypatch, ["--ack_id", "5", "--title", "בודק", "--resumed", "--pin", "--no-context"])
+    text = c["edit"][0][1]
+    assert text == "🔄 בודק — ⚙️ ממשיך עם ה-agent מהמשימה הקודמת"
+    assert "בתור" not in text and "עובד" not in text and "מייצר" not in text
+    assert c["log"] == [(5, "sent", text)]
+    assert c["pin"] == [5]
+
+
+def test_queued_and_resumed_cannot_be_combined(monkeypatch):
+    with pytest.raises(SystemExit):
+        run_main(monkeypatch, ["--ack_id", "5", "--title", "בודק", "--queued", "--resumed", "--no-context"])
 
 
 def make_db(path, rows):
@@ -85,7 +102,8 @@ def test_ack_moved_on_or_deleted_untouched(tmp_path):
 
 def test_old_rows_and_other_texts_untouched(tmp_path):
     rows = [(7, "sent", SPAWN, ts(4000)), (8, "sent", "voice: x — מייצר agent", ts(300)),
-            (9, "sent", "🔄 בודק — 📋 בתור אצל ה-agent שכבר עובד על זה", ts(300))]
+            (9, "sent", "🔄 בודק — 📋 בתור אצל ה-agent שכבר עובד על זה", ts(300)),
+            (10, "sent", "🔄 בודק — ⚙️ ממשיך עם ה-agent מהמשימה הקודמת", ts(300))]
     assert run_check(tmp_path, rows)[1] == []
 
 

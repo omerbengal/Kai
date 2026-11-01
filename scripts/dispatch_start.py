@@ -16,9 +16,13 @@ Usage:
         # an ACK already exists (voice "🎤 מתמלל..." / Option D turned worker): edit it to the
         # titled text instead of sending a new one, log it, pin it. Prints ACK_MSG_ID=<ID>.
     python D:/Kai/scripts/dispatch_start.py --ack_id ID --title "<summary>" --queued --pin
-        # follow-up by SendMessage to an agent that already exists: nothing is being spawned, and a busy
-        # agent reads the message only at its next tool round (15 min in the worst case), so the ACK says
+        # SendMessage answered "Message queued for delivery": the agent is busy and reads the message only
+        # at its next tool round (15 min in the worst case), so the ACK says
         # "🔄 <summary> — 📋 בתור אצל ה-agent שכבר עובד על זה" instead of "מייצר agent" (Omer msg 21171).
+    python D:/Kai/scripts/dispatch_start.py --ack_id ID --title "<summary>" --resumed --pin
+        # SendMessage answered "Resuming agent": it had finished and restarts now, so nobody was working
+        # and "בתור" would be false: "🔄 <summary> — ⚙️ ממשיך עם ה-agent מהמשימה הקודמת" (Omer msg 21373).
+        # Only the SendMessage result tells the two apart, so this call comes after it, never beside it.
     python D:/Kai/scripts/dispatch_start.py --no-ack          # trivial / voice: pending + context only
 
 Output (stdout):
@@ -119,15 +123,23 @@ def main():
     p.add_argument("--context", type=int, default=20)
     p.add_argument("--title", default=None,
                    help='worker path: ACK text becomes "🔄 <title> — ⏳ מייצר agent..." and is logged to ack_log')
-    p.add_argument("--queued", action="store_true",
-                   help='with --title: follow-up to an existing agent, ACK says "בתור" and never "מייצר agent"')
+    follow_up = p.add_mutually_exclusive_group()
+    follow_up.add_argument("--queued", action="store_true",
+                           help='with --title: SendMessage said "Message queued for delivery", ACK says "בתור"')
+    follow_up.add_argument("--resumed", action="store_true",
+                           help='with --title: SendMessage said "Resuming agent", ACK says "ממשיך"')
     p.add_argument("--pin", action="store_true", help="pin the ACK (worker-spawn points ONLY)")
     p.add_argument("--ack_id", default=None, help="edit this existing ACK instead of sending a new one")
     p.add_argument("--no-context", action="store_true", help="skip PENDING/CONTEXT output (ACK-only call)")
     args = p.parse_args()
 
     if args.title:
-        status = "📋 בתור אצל ה-agent שכבר עובד על זה" if args.queued else "⏳ מייצר agent..."
+        if args.queued:
+            status = "📋 בתור אצל ה-agent שכבר עובד על זה"
+        elif args.resumed:
+            status = "⚙️ ממשיך עם ה-agent מהמשימה הקודמת"
+        else:
+            status = "⏳ מייצר agent..."
         args.text = f"🔄 {args.title} — {status}"
 
     mid = None
