@@ -70,6 +70,7 @@ Any "no" → fix before sending. If Omer corrected you twice in a row on anythin
 - Why: a muddled explanation makes Omer do the analysis himself.
 - Separate issues get separate explanations; never merge two bugs into one story. Bottom line first - also in
   every message a SCRIPT generates (summaries, alerts, reports): numbers without a stated conclusion are unfinished.
+- A finding that needs a decision is an alert with a proposed fix and buttons, never an FYI line ("FYI only").
 - Match his level: skip basics where the reader is expert. Where they are a beginner, defining a term in brackets is
   not enough: write the whole thing in everyday words first (what happens, in what order) and give the app's term once
   after it; cut every secondary nuance a beginner does not need to act.
