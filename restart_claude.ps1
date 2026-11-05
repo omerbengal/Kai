@@ -10,6 +10,19 @@
 # Step 1: Snapshot currently-running Claude PIDs so we can detect the new one
 $preLaunchPIDs = @(Get-Process -Name "claude" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
 
+# Step 1a: Domain bot sessions (multi-bot stage 1, config\bots.json) are not main Kai:
+# never kill them, and never mistake one for "the new session". Each bot records
+# its claude.exe PID in <home>\claude.pid from its own SessionStart hook.
+$botPIDs = @()
+foreach ($pf in (Get-ChildItem "D:\KaiBots\*\claude.pid" -ErrorAction SilentlyContinue)) {
+    $v = (Get-Content $pf.FullName -Raw -ErrorAction SilentlyContinue)
+    if ($v -and $v.Trim() -match '^\d+$') { $botPIDs += [int]$v.Trim() }
+}
+if ($botPIDs) {
+    Write-Host "Domain bot claude PIDs kept alive: $($botPIDs -join ',')"
+    $preLaunchPIDs = @($preLaunchPIDs | Where-Object { $botPIDs -notcontains $_ })
+}
+
 # Step 1b: Read OLD cmd PID NOW — before starting the new session overwrites this file
 $cmdPidFile = "D:\Kai\tmp\current_cmd_pid.txt"
 $oldCmdPID = $null
@@ -87,7 +100,7 @@ while ($elapsed -lt $timeout) {
     Start-Sleep -Seconds 2
     $elapsed += 2
     $newClaude = Get-Process -Name "claude" -ErrorAction SilentlyContinue |
-                 Where-Object { $preLaunchPIDs -notcontains $_.Id }
+                 Where-Object { ($preLaunchPIDs -notcontains $_.Id) -and ($botPIDs -notcontains $_.Id) }
     if ($newClaude) {
         $confirmed = $true
         break

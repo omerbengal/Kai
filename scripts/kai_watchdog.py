@@ -41,15 +41,31 @@ def is_claude_running() -> bool:
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                "if (Get-Process -Name claude -ErrorAction SilentlyContinue) {'YES'} else {'NO'}",
+                "(Get-Process -Name claude -ErrorAction SilentlyContinue | "
+                "Select-Object -ExpandProperty Id) -join ','",
             ],
             capture_output=True,
             text=True,
             timeout=10,
         )
-        return "YES" in result.stdout
+        pids = {int(p) for p in result.stdout.strip().split(",") if p.strip().isdigit()}
+        return main_claude_running(pids)
     except Exception:
         return False
+
+
+def main_claude_running(claude_pids: set, bot_pids: set = None) -> bool:
+    """True if a claude.exe that is NOT a domain bot session is alive.
+
+    Multi-bot stage 1 (05/11/2026): a domain bot (config/bots.json) is its own
+    claude.exe. Counting it would hide a dead main Kai from the watchdog."""
+    if bot_pids is None:
+        try:
+            import kai_bots
+            bot_pids = kai_bots.bot_claude_pids()
+        except Exception:
+            bot_pids = set()
+    return bool(set(claude_pids) - set(bot_pids))
 
 
 def send_telegram(text: str):

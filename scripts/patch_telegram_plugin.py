@@ -265,6 +265,142 @@ def patch_poll_giveup(path: str) -> bool:
     return True
 
 
+# --- Forum topics patch (multi-bot stage 1, 05/11/2026) ---
+# Lets a bot own one or more topics of a forum group: inbound meta carries
+# message_thread_id, the reply tool accepts it (text, files, buttons), the inbound
+# typing action shows inside the topic, and a group policy may list its topics
+# ("topics": ["<thread id>", "general"]) so the gate delivers only messages from
+# those topics or ones that mention / reply to this bot. Without "topics" in a
+# group policy, and in private chats, behaviour is unchanged (every addition is
+# conditional on a thread id being present).
+# All-or-nothing: if any anchor is missing, nothing is written.
+# Applied only while config/telegram_topics_patch.on exists (TOPICS_FLAG), so it
+# reaches the live server.ts on purpose, at the second bot's launch.
+TOPICS_MARKER = "kaiTopics"
+TOPICS_FLAG = r"D:\Kai\config\telegram_topics_patch.on"
+
+TOPICS_REPLACEMENTS = [
+    # 1. gate: per-group topic ownership
+    (
+        "    if (requireMention && !isMentioned(ctx, access.mentionPatterns)) {\n",
+        "    const kaiTopics = (policy as { topics?: string[] }).topics // kaiTopics\n"
+        "    if (kaiTopics && kaiTopics.length > 0) {\n"
+        "      const isTopicMsg = ctx.message?.is_topic_message === true\n"
+        "      const tid = ctx.message?.message_thread_id\n"
+        "      const inOwnTopic = isTopicMsg\n"
+        "        ? (tid != null && kaiTopics.includes(String(tid)))\n"
+        "        : kaiTopics.includes('general')\n"
+        "      if (!inOwnTopic && !isMentioned(ctx, access.mentionPatterns)) {\n"
+        "        return { action: 'drop' }\n"
+        "      }\n"
+        "      return { action: 'deliver', access }\n"
+        "    }\n"
+        "    if (requireMention && !isMentioned(ctx, access.mentionPatterns)) {\n",
+    ),
+    # 2. inbound meta: topic id
+    (
+        "        ...(attachment ? {",
+        "        ...(ctx.message?.is_topic_message && ctx.message?.message_thread_id != null ? {\n"
+        "          message_thread_id: String(ctx.message.message_thread_id), // kaiTopics\n"
+        "        } : {}),\n"
+        "        ...(attachment ? {",
+    ),
+    # 3. callback (button press) meta: topic id of the message holding the button
+    (
+        "          callback_data: data,\n",
+        "          callback_data: data,\n"
+        "          ...((cq.message as { is_topic_message?: boolean } | undefined)?.is_topic_message"
+        " && (cq.message as { message_thread_id?: number } | undefined)?.message_thread_id != null ? {\n"
+        "            message_thread_id: String((cq.message as { message_thread_id?: number }).message_thread_id),"
+        " // kaiTopics\n"
+        "          } : {}),\n",
+    ),
+    # 4. reply tool schema
+    (
+        "            description: 'Message ID to thread under. Use message_id from the inbound <channel> block.',\n"
+        "          },\n",
+        "            description: 'Message ID to thread under. Use message_id from the inbound <channel> block.',\n"
+        "          },\n"
+        "          message_thread_id: {\n"
+        "            type: 'string',\n"
+        "            description: 'Forum topic to post in. Pass message_thread_id from the inbound <channel>"
+        " block when it has one; omit otherwise.', // kaiTopics\n"
+        "          },\n",
+    ),
+    # 5. reply handler: read the topic id
+    (
+        "        const reply_to = args.reply_to != null ? Number(args.reply_to) : undefined\n",
+        "        const reply_to = args.reply_to != null ? Number(args.reply_to) : undefined\n"
+        "        const threadId = args.message_thread_id != null ? Number(args.message_thread_id) : undefined"
+        " // kaiTopics\n",
+    ),
+    # 6. text chunks into the topic (sits on the inline-keyboard patch)
+    (
+        "              ...(inlineKb && i === chunks.length - 1",
+        "              ...(threadId != null ? { message_thread_id: threadId } : {}),\n"
+        "              ...(inlineKb && i === chunks.length - 1",
+    ),
+    # 7. files into the topic
+    (
+        "          const opts = reply_to != null && replyMode !== 'off'\n"
+        "            ? { reply_parameters: { message_id: reply_to } }\n"
+        "            : undefined\n",
+        "          const opts = { // kaiTopics\n"
+        "            ...(reply_to != null && replyMode !== 'off' ? { reply_parameters: { message_id: reply_to } } : {}),\n"
+        "            ...(threadId != null ? { message_thread_id: threadId } : {}),\n"
+        "          }\n",
+    ),
+    # 9. second-bot guard: a session launched as a Kai domain bot (KAI_BOT set) must
+    #    never fall back to the default state dir - it would read the main bot's
+    #    token and bot.pid, SIGTERM the main poller and fight it for getUpdates.
+    (
+        "const INBOX_DIR = join(STATE_DIR, 'inbox')\n",
+        "if (process.env.KAI_BOT && !process.env.TELEGRAM_STATE_DIR) { // kaiTopics guard\n"
+        "  process.stderr.write(`telegram channel: KAI_BOT=${process.env.KAI_BOT} without"
+        " TELEGRAM_STATE_DIR - refusing to touch the main bot's state\\n`)\n"
+        "  process.exit(1)\n"
+        "}\n"
+        "const INBOX_DIR = join(STATE_DIR, 'inbox')\n",
+    ),
+    # 8. inbound typing action inside the topic
+    (
+        "  void bot.api.sendChatAction(chat_id, 'typing').catch(() => {})\n",
+        "  void bot.api.sendChatAction(chat_id, 'typing',\n"
+        "    ctx.message?.is_topic_message && ctx.message?.message_thread_id != null\n"
+        "      ? { message_thread_id: ctx.message.message_thread_id } : undefined, // kaiTopics\n"
+        "  ).catch(() => {})\n",
+    ),
+]
+
+
+def topics_patch_text(content: str):
+    """Return content with the topics patch applied, or None if an anchor is missing.
+    Pure function (no I/O) so tests can run it on a copy of server.ts."""
+    if TOPICS_MARKER in content:
+        return content
+    for anchor, _ in TOPICS_REPLACEMENTS:
+        if content.count(anchor) != 1:
+            return None
+    for anchor, replacement in TOPICS_REPLACEMENTS:
+        content = content.replace(anchor, replacement, 1)
+    return content
+
+
+def patch_topics(path: str) -> bool:
+    with open(path, "r", encoding="utf-8") as f:
+        content = f.read()
+    if TOPICS_MARKER in content:
+        return False  # already patched
+    patched = topics_patch_text(content)
+    if patched is None:
+        print(f"[patch_telegram] topics: an anchor is missing or not unique in {path}; nothing written",
+              file=sys.stderr)
+        return False
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(patched)
+    return True
+
+
 def patch_inline_keyboard(path: str) -> bool:
     with open(path, "r", encoding="utf-8") as f:
         content = f.read()
@@ -616,6 +752,12 @@ def main():
         poll_giveup_applied = patch_poll_giveup(path)
         verb4 = "patched" if poll_giveup_applied else "already patched"
         print(f"[patch_telegram] poll_giveup {verb4}: {path}", file=sys.stderr)
+
+        # Forum topics: only while the flag file exists (multi-bot stage 1).
+        if os.path.exists(TOPICS_FLAG):
+            topics_applied = patch_topics(path)
+            verb5 = "patched" if topics_applied else "already patched or skipped"
+            print(f"[patch_telegram] topics {verb5}: {path}", file=sys.stderr)
 
         # Re-apply the read-only lock so plugin auto-updates can't revert the patch.
         # Only lock files that ended up fully patched (don't lock a file whose anchors
