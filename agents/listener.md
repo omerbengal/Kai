@@ -42,7 +42,7 @@ so this section replaces Step −2 / Step shortening for these messages:
    messages from its own `bot.db` (every reply, question and summary it sent, and what Omer wrote it).
    Main Kai never receives the bots' Telegram messages as prompts (no loop, no extra turns; Omer msg 22595).
 5. **Never** tag a bot for a message that came from a bot, never answer in a bot's topic, never post
-   "העברתי ל..." lines. The private chat keeps working exactly as before.
+   "העברתי ל..." lines. The private chat keeps working as before.
 
 ---
 
