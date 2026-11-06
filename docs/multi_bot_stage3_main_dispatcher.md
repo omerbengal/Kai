@@ -178,3 +178,35 @@ needs it to be used.
 
 Rollback: remove the General entry from main access.json (main drops the group again) and `<REDACTED_SECRET>` from the
 bots' allowFrom; turning the BotFather mode off stops all bot-to-bot delivery.
+
+## 5. Bot-to-bot requests through General (06/11/2026, Omer msgs 358 / 361: "חלוקת תפקידים טהורה")
+
+Problem: the miluim bot read WhatsApp itself (the bus executor read for it) and sent through the hidden local
+bus to the WhatsApp bot. Omer wants a pure role split, visible in the group.
+
+Rule (all bots): a bot that needs another bot's domain tags that bot in General. Enforced in code for
+WhatsApp now; documented as the general rule in the bot template.
+
+- Requester: `bots/bot_tg.py ask --bot B --to T --text "..." [--origin-tag N] [--wait 420]` posts
+  `@<T username> <request>` in General (no thread, not silent), records it in `<home>/tmp/bot_requests.json`,
+  puts 🤔 on the origin General tag while waiting and waits. `ask-wait` keeps waiting.
+- Target: the auto-ACK hook sees a General tag whose `user_id` is one of our bots (`bot_id` in
+  config/bots.json): same path as main Kai's tag (👀, ACK in its topic quoting the tag, general-done), plus
+  `FROM_BOT=<bot>` and `from_bot` in general_tags.json. general-done for such a tag may carry the answer
+  (up to 10 lines / 700 chars) because that General reply is what the requester receives.
+- Requester's hook: a message from bot T replying to one of its requests = `BOT_ANSWER` (General reply = the
+  answer, state answered; topic reply = a detail; T's ACK ignored), no ACK, no typing, 👀 back on the origin
+  tag. Any other bot message = `BOT_CHATTER`, ignored. A stranger in the group = ignored.
+- Loop guards (code): never self, never main Kai, depth 1 (`ask` refuses while the bot has an open tag from a
+  bot), 5 asks per 10 min per bot, 8 incoming bot tags per 10 min, answers only from the asked bot.
+- Access: every bot's group `allowFrom` = Omer + main Kai + the other bots (`setup_bot.py --sync-access`;
+  DMs stay Omer only). Bot-to-Bot mode is on in BotFather for the three bots.
+- WhatsApp for domain bots: the guard blocks the bridge, its DBs, WhatsApp scripts and `bus.py
+  read/search/draft/wait/status/policy`; `bus.create` refuses a bot without the capability. The bus stays
+  only for the WhatsApp bot's own sends (draft + Omer's button + KaiBusServe executor); its 4-post handoff
+  code no longer fires. A request from another bot never approves a send: the WhatsApp bot drafts it and
+  Omer presses its button in 💬. `wa_policy` of a domain bot = which chats the WhatsApp bot handles for it
+  (model-enforced on the WhatsApp side).
+- Not covered (deliberately): scheduled Windows-task scripts keep their own bridge calls (cohort_status /
+  registration_status posts, signals_tracker / group_list_alerts reads), per Omer 06/11 msg 22617.
+- Tests: tests/test_bot_to_bot.py, tests/test_bot_guard.py, tests/test_bus.py, tests/test_kai_bots.py.

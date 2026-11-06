@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 """Request bus between Kai bots (multi-bot stage 2, 05/11/2026; design: docs/multi_bot_separation_design.md s.3).
 
-Telegram never delivers one bot's messages to another bot, so bots ask each other through this local bus
-(D:/KaiBots/_bus/bus.db). Today it carries WhatsApp work for bots that have no WhatsApp: reads and searches
-answer within seconds; a send needs Omer's button press, recorded by a HOOK (code), never by a model.
+Since 06/11/2026 (Omer msgs 358 / 361, "חלוקת תפקידים טהורה") the bus serves ONLY the bot that owns the
+capability (the WhatsApp bot): its own sends wait here for Omer's button press, recorded by a HOOK (code),
+never by a model, and the executor (KaiBusServe) sends them. Other bots no longer use it at all: they ask the
+WhatsApp bot visibly by tagging it in the group's General topic (`bot_tg.py ask`, Bot-to-Bot mode on), and
+`create` refuses them. The 4-post handoff below is kept for history; with one owner it never fires.
 
 Visibility contract (Omer, 05/11, msg 22360): each request between two bots shows 4 posts, each by the
 writing bot in ITS OWN topic, with its own token. The posts are made here, in code, so they cannot be skipped:
@@ -172,6 +174,11 @@ def create(from_bot, kind, payload, summary, db=None):
     import wa
     if kind not in KIND_CAP:
         raise BusError(f"unknown kind {kind}")
+    if KIND_CAP[kind] not in bots().get(from_bot, {}).get("caps", []):
+        # 06/11/2026 (Omer msgs 358 / 361, "חלוקת תפקידים טהורה"): no hidden path between bots. A bot without
+        # the capability asks its owner visibly, by tagging it in the group's General topic.
+        raise BusError(f"{from_bot} has no {KIND_CAP[kind]} capability: ask in General with "
+                       f"`bot_tg.py ask --bot {from_bot} --to {owner(KIND_CAP[kind])} --text \"...\"`")
     chat = payload.get("chat")
     if kind != "wa_search" or chat:
         jid, name = wa.resolve_chat(chat)

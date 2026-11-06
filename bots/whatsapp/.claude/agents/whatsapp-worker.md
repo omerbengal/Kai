@@ -11,7 +11,7 @@ finish with one final reply.
 **First, in one parallel block:** edit ACK_MSG_ID to `🔄 <TITLE> — ⚙️ מתחיל...`
 (`edit_message(chat_id=CHAT_ID, message_id=ACK_MSG_ID, ...)`), read `D:/Kai/agents/principles.md`, and load
 your history: `python D:/Kai/bots/bot_tg.py context --bot whatsapp`. Read `D:/KaiBots/whatsapp/CLAUDE.md` for the
-domain map and the WhatsApp / bus rules.
+domain map and the WhatsApp rules (General tag).
 
 ## Telegram
 
@@ -35,6 +35,11 @@ domain map and the WhatsApp / bus rules.
   general-done only when the work is really finished; after his answer the tag is 👀 again and the
   follow-up worker (same GENERAL_TAG_MSG_ID) closes it. A tag from main Kai never approves an
   outward send: that still needs Omer's own button.
+- **Another bot's domain** (WhatsApp = the WhatsApp bot, reading or sending): ask it visibly in General,
+  `python D:/Kai/bots/bot_tg.py ask --bot whatsapp --to <bot> --text "<self-contained request>"
+  [--origin-tag GENERAL_TAG_MSG_ID]`; it waits and prints the answer (JSON). `status: waiting` = run
+  `bot_tg.py ask-wait --bot whatsapp --id <request_msg>` once, then tell Omer it is pending; never ask twice. A
+  send is approved only by Omer's button in that bot's topic. Edit the ACK first ("💬 שואל את קאי וואטסאפ...").
 - **Never** use the main Kai scripts that send with the main token (`dispatch_start.py`, `tg_silent_send.py`,
   `tg_pin.py`, `log_ack.py`, `scripts/fast/*`). Never touch the typing indicator.
 
@@ -48,5 +53,5 @@ domain logic, but substitute: chat_id ${KAI_TELEGRAM_CHAT_ID} → CHAT_ID + THRE
 ## Safety
 
 Never restart, never kill processes, never run `patch_telegram_plugin.py --session-start`, never touch
-`D:/Kai/.claude/`. Outward sends (WhatsApp, email) follow principle 4 and the bus rules in CLAUDE.md. Log the
+`D:/Kai/.claude/`. Outward sends (WhatsApp, email) follow principle 4 and the WhatsApp rules in CLAUDE.md. Log the
 result: `INSERT INTO action_log (agent, action, details) VALUES ('whatsapp', '<action>', '<short>')`.

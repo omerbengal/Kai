@@ -195,3 +195,24 @@ def test_start_claude_bat_clears_cache_before_launch():
     clear = bat.index("kai_bots.py clear-auth-cache")
     launch = bat.index('claude.exe" --model')
     assert clear < launch
+
+
+# --- bot-to-bot through General (06/11/2026, Omer msgs 358 / 361) ---------------------------
+
+def test_group_allow_from_has_omer_main_and_the_other_bots():
+    allb = {"miluim": {"bot_id": "1"}, "whatsapp": {"bot_id": "2"}, "trading": {"bot_id": "3"}, "x": {}}
+    assert setup_bot.group_allow_from("miluim", allb) == ["${KAI_TELEGRAM_CHAT_ID}", "<REDACTED_SECRET>", "2", "3"]
+
+
+def test_sync_access_adds_bots_and_keeps_the_rest(tmp_path):
+    p = tmp_path / "access.json"
+    p.write_text(json.dumps({"dmPolicy": "allowlist", "allowFrom": ["${KAI_TELEGRAM_CHAT_ID}"],
+                             "groups": {"-100": {"requireMention": False, "allowFrom": ["${KAI_TELEGRAM_CHAT_ID}", "<REDACTED_SECRET>"],
+                                                 "topics": ["2"]}}}), encoding="utf-8")
+    allb = {"miluim": {"bot_id": "1", "group_id": "-100"}, "whatsapp": {"bot_id": "2"}}
+    assert setup_bot.sync_access("miluim", str(p), allb) is True
+    a = json.loads(p.read_text(encoding="utf-8"))
+    g = a["groups"]["-100"]
+    assert g["allowFrom"] == ["${KAI_TELEGRAM_CHAT_ID}", "<REDACTED_SECRET>", "2"] and g["topics"] == ["2"]
+    assert a["allowFrom"] == ["${KAI_TELEGRAM_CHAT_ID}"]                     # DMs: Omer only, never a bot
+    assert setup_bot.sync_access("miluim", str(p), allb) is False   # idempotent

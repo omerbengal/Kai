@@ -364,6 +364,15 @@ def loop(p, sender=send_typing, sleep=time.sleep):
     _tlog(p, "LOOP-END", f"sends={sends}")
 
 
+def _other_bot_ids():
+    try:
+        sys.path.insert(0, "D:/Kai/scripts")
+        import kai_bots
+        return {str(c.get("bot_id")) for c in kai_bots.load_config().values() if c.get("bot_id")}
+    except Exception:
+        return set()
+
+
 def parse_open(prompt, group_id, own_topic=None):
     """(chat_id, thread_id, msg_id) of the first channel message that should show typing, else None.
     A General message (a tag from main Kai, stage 3) types in the bot's own topic, where the work happens."""
@@ -378,6 +387,8 @@ def parse_open(prompt, group_id, own_topic=None):
         chat = attr("chat_id")
         if chat not in {str(group_id), OMER_DM}:
             continue
+        if attr("user_id") in _other_bot_ids() and (attr("message_thread_id") or attr("reply_to_message_id")):
+            continue   # another bot's answer / chatter (bot-to-bot, 06/11/2026): no work starts, no typing
         thread = attr("message_thread_id")
         if not thread and chat == str(group_id) and own_topic:
             thread = str(own_topic)

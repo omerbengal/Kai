@@ -84,9 +84,10 @@ def test_main_exit_code(monkeypatch=None):
 
 
 def test_bus_rules_stage2():
-    # domain bot: bus as itself is fine; impersonation, executor, approvals, raw wa.py / sends are not
-    assert chk("miluim", "Bash", command='python D:/Kai/bots/bus.py read --from miluim --chat staff --summary "x"') is None
-    assert chk("miluim", "Bash", command="python D:/Kai/bots/bus.py wait --id 3 --bot miluim") is None
+    # domain bot: since 06/11/2026 no bus at all (General tag instead); impersonation, executor, approvals,
+    # raw wa.py / sends stay blocked for everyone
+    assert chk("wa", "Bash", command='python D:/Kai/bots/bus.py read --from wa --chat staff --summary "x"') is None
+    assert chk("wa", "Bash", command="python D:/Kai/bots/bus.py wait --id 3 --bot wa") is None
     assert chk("miluim", "Bash", command='python D:/Kai/bots/bus.py draft --from wa --chat x --text "y"')
     assert chk("miluim", "Bash", command="python D:/Kai/bots/bus.py serve --once")
     assert chk("miluim", "Bash", command="echo {} | python D:/Kai/bots/bus.py approve-hook --bot miluim")
@@ -106,3 +107,25 @@ def test_blocked_patterns_from_config(tmp_path):
     p.write_text(json.dumps(cfg))
     assert guard.check("trading", "Bash", {"command": "python D:/Kai/scripts/price_watch.py --stop"}, str(p))
     assert guard.check("trading", "Bash", {"command": "python D:/Kai/scripts/price_watch.py --dry-run"}, str(p)) is None
+
+
+# ---- 06/11/2026 (Omer msgs 358 / 361): WhatsApp only through a visible General tag ----------------
+
+def test_domain_bot_cannot_use_the_bus_for_whatsapp():
+    assert chk("miluim", "Bash", command='python D:/Kai/bots/bus.py read --from miluim --chat tickets --summary x')
+    assert chk("miluim", "Bash", command='python D:/Kai/bots/bus.py search --from miluim --query x --chat staff')
+    assert chk("miluim", "Bash", command='python D:/Kai/bots/bus.py draft --from miluim --chat staff --text hi')
+    assert chk("miluim", "Bash", command='python D:/Kai/bots/bus.py wait --id 3 --bot miluim')
+    assert chk("miluim", "Bash", command='python D:/Kai/bots/wa.py read --chat tickets')
+    assert chk("miluim", "Bash", command='python D:/Kai/scripts/listing_notify_wa.py')
+    # the WhatsApp bot keeps the bus for its own approved sends
+    assert chk("wa", "Bash", command='python D:/Kai/bots/bus.py draft --from wa --chat staff --text hi') is None
+    assert chk("wa", "Bash", command='python D:/Kai/bots/wa.py read --chat tickets') is None
+
+
+def test_domain_bot_asks_in_general_only_as_itself():
+    assert chk("miluim", "Bash",
+               command='python D:/Kai/bots/bot_tg.py ask --bot miluim --to whatsapp --text "כמה הודעות?"') is None
+    assert chk("miluim", "Bash", command='python D:/Kai/bots/bot_tg.py ask --bot wa --to whatsapp --text x')
+    assert chk("miluim", "Bash", command='python D:/Kai/bots/bot_tg.py general-done --bot wa --chat 1 --tag-msg 2')
+    assert chk("miluim", "Bash", command='python D:/Kai/bots/bot_tg.py ask-wait --bot miluim --id 5') is None

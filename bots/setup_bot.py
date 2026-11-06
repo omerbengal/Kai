@@ -39,6 +39,38 @@ def call(token, method):
         return json.loads(r.read().decode("utf-8"))
 
 
+def group_allow_from(name, allb):
+    """Who may talk to this bot in the group: Omer, main Kai (General handoffs) and every OTHER Kai bot (its
+    General tags and its answers to this bot's tags, bot-to-bot since 06/11/2026). DMs stay Omer only."""
+    out = [OMER_ID, MAIN_BOT_ID]
+    for n, c in allb.items():
+        bid = str(c.get("bot_id") or "")
+        if n != name and bid and bid not in out:
+            out.append(bid)
+    return out
+
+
+def sync_access(name, path, allb):
+    """Bring an existing access.json's group allowFrom up to group_allow_from. True = file changed."""
+    with open(path, encoding="utf-8") as f:
+        access = json.load(f)
+    gid = str(allb[name].get("group_id") or "")
+    want = group_allow_from(name, allb)
+    changed = False
+    for g, pol in access.get("groups", {}).items():
+        if gid and g != gid:
+            continue
+        if pol.get("allowFrom") != want:
+            pol["allowFrom"] = want
+            changed = True
+    if changed:
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(access, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    return changed
+
+
 def find_group_and_topic(updates, topic_name):
     """(group_id, thread_id, group_title) from getUpdates results."""
     group_id = title = thread_id = None
@@ -81,6 +113,13 @@ def seed_memory(home):
 
 
 def main(argv):
+    if "--sync-access" in argv:  # every bot: add the other bots to its group allowFrom (bot-to-bot)
+        allb = kai_bots.load_config()
+        for n, c in allb.items():
+            p = os.path.join(c["state_dir"], "access.json")
+            if os.path.exists(p):
+                print(n, "changed" if sync_access(n, p, allb) else "unchanged")
+        return 0
     name = argv[argv.index("--bot") + 1]
     cfg = kai_bots.bot(name)
     topic_name = argv[argv.index("--topic-name") + 1] if "--topic-name" in argv else cfg.get("topic_name", "מילואים")
@@ -115,7 +154,8 @@ def main(argv):
     access = {
         "dmPolicy": "allowlist",
         "allowFrom": [OMER_ID],
-        "groups": {group_id: {"requireMention": False, "allowFrom": [OMER_ID, MAIN_BOT_ID],  # main: General tags
+        "groups": {group_id: {"requireMention": False,
+                              "allowFrom": group_allow_from(name, kai_bots.load_config()),  # + main, bots
                               "topics": [thread_id]}},
         "pending": {},
         "ackReaction": "",
@@ -125,7 +165,8 @@ def main(argv):
 
     with open(kai_bots.CONFIG, encoding="utf-8") as f:
         full = json.load(f)
-    full["bots"][name].update({"username": username, "group_id": group_id, "topics": [thread_id]})
+    full["bots"][name].update({"username": username, "bot_id": str(me["result"]["id"]), "group_id": group_id,
+                               "topics": [thread_id]})
     with open(kai_bots.CONFIG, "w", encoding="utf-8") as f:
         json.dump(full, f, ensure_ascii=False, indent=2)
 

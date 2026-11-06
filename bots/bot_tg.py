@@ -25,6 +25,10 @@ CLI:
   bot_tg.py general-done --bot miluim --chat C --tag-msg M --summary "..." [--fail] [--detail-msg D]
                                                      end of a General task: 👍/👎 on the tag + ONE short line
                                                      in General (reply to the tag) + link to the details
+  bot_tg.py ask --bot miluim --to whatsapp --text "..." [--origin-tag N] [--wait 420]
+                                                     ask another bot by tagging it in General; waits for its
+                                                     reply there and prints it (JSON). Bot-to-bot, 06/11/2026
+  bot_tg.py ask-wait --bot miluim --id <request msg> [--timeout 420]   keep waiting for that answer
   bot_tg.py general-wait --bot miluim --chat C --tag-msg M [--question-msg Q]
                                                      stopped to ask Omer: 🤔 on the tag, no General line; his
                                                      answer in the topic reopens it (👀, GENERAL_PENDING_TAG)
@@ -225,6 +229,16 @@ MAX_SUMMARY_WORDS = 15
 MAX_SUMMARY_CHARS = 120
 VOICE_ACK = "🎤 מתמלל... ⏳"
 OMER_DM = os.environ.get("KAI_TELEGRAM_CHAT_ID", "")
+OMER_ID = os.environ.get("KAI_TELEGRAM_CHAT_ID", "")
+MAIN_BOT_ID = "<REDACTED_SECRET>"   # main Kai: its General tags are handoffs (stage 3)
+# Bot-to-bot requests through General (06/11/2026, Omer msgs 358 / 361, "חלוקת תפקידים טהורה")
+ASK_WINDOW_S = 600
+ASK_MAX_PER_WINDOW = 5          # outgoing asks per bot per window
+BOT_TAGS_MAX_PER_WINDOW = 8     # incoming tags from bots per window, all bots together
+ASK_DEFAULT_WAIT = 420          # one Bash call is capped at 10 min
+DEPTH_HOURS = 1                 # a bot tag still open this recently blocks asking (depth 1)
+BOT_ANSWER_MAX_LINES = 10
+BOT_ANSWER_MAX_CHARS = 700
 
 
 def ack_classify(bot, attrs, content):
@@ -238,6 +252,9 @@ def ack_classify(bot, attrs, content):
         return ("none", "other_chat")
     if not attrs.get("message_id"):
         return ("none", "no_message_id")
+    uid = attrs.get("user_id")
+    if uid and uid not in {OMER_ID, MAIN_BOT_ID} and not bot_name_by_id(uid):
+        return ("none", "stranger")   # the plugin's allowFrom should already drop it; belt and braces
     if attrs.get("attachment_kind") in {"voice", "audio"}:
         return ("ack", VOICE_ACK)
     if "callback_data" in attrs or content.startswith("[callback:"):
@@ -283,10 +300,19 @@ def general_done(bot, chat, tag_msg, summary, ok=True, detail_msg=None, sender=N
     Omer 06/11: "הודעת הסיכום צריכה להיות ממש קצרה" - a long or multi-line summary is refused here."""
     sender, reactor = sender or send, reactor or react
     s = (summary or "").strip().lstrip("‏").strip()
-    if not s or "\n" in s or len(s.split()) > MAX_SUMMARY_WORDS or len(s) > MAX_SUMMARY_CHARS:
+    tag_info = load_tags(bot).get(str(tag_msg), {})
+    if tag_info.get("from_bot"):
+        # a tag from another of our bots (bot_tg.py ask): this General reply IS the answer that bot waits for
+        # (its hook captures it), so it may carry the data, still short (06/11/2026, Omer msgs 358 / 361)
+        lines_ = [ln.strip().lstrip("‏").strip() for ln in s.splitlines() if ln.strip()]
+        if not lines_ or len(lines_) > BOT_ANSWER_MAX_LINES or len(s) > BOT_ANSWER_MAX_CHARS:
+            raise ValueError(f"an answer to a bot is <= {BOT_ANSWER_MAX_LINES} lines / {BOT_ANSWER_MAX_CHARS}"
+                             " chars: only what the asking bot needs")
+        s = "\n‏".join(lines_)
+    elif not s or "\n" in s or len(s.split()) > MAX_SUMMARY_WORDS or len(s) > MAX_SUMMARY_CHARS:
         raise ValueError(f"summary must be ONE line, <= {MAX_SUMMARY_WORDS} words / {MAX_SUMMARY_CHARS} chars"
                          " (the details go in the topic)")
-    if load_tags(bot).get(str(tag_msg), {}).get("state") == "waiting":
+    if tag_info.get("state") == "waiting":
         raise ValueError("this tag is WAITING for Omer's answer (general-wait): not done yet. Close it only"
                          " after his answer, when the work is really over")
     try:
@@ -464,6 +490,179 @@ def close_on_ack_delete(bot, ack_id, reactor=None):
             _set_tag(bot, k, state="done", close_on_ack=None)
 
 
+# --- Bot-to-bot requests through General (06/11/2026, Omer msgs 358 / 361) --------------------------------
+# A bot that needs another bot's domain (WhatsApp: only the WhatsApp bot) tags it in General with `ask`.
+# Everything is a visible Telegram message; nothing goes through a hidden channel. The target handles it like
+# main Kai's tag (👀, its own topic, general-done = a reply to the tag in General). The requester's auto-ACK
+# hook catches that reply (BOT_ANSWER) and stores it in <home>/tmp/bot_requests.json, where the waiting
+# `ask` / `ask-wait` reads it. Loop guards: not self, not main Kai, depth 1, rate limits, chatter ignored.
+
+def all_bots():
+    return kai_bots.load_config()
+
+
+def bot_name_by_id(uid):
+    if not uid:
+        return None
+    try:
+        for n, c in all_bots().items():
+            if str(c.get("bot_id") or "") == str(uid):
+                return n
+    except Exception:
+        pass
+    return None
+
+
+def _req_path(bot):
+    return os.path.join(kai_bots.bot(bot)["home"], "tmp", "bot_requests.json")
+
+
+def _waiter_path(bot, rid):
+    return os.path.join(kai_bots.bot(bot)["home"], "tmp", "bot_request_waiters", f"{rid}.until")
+
+
+def load_requests(bot):
+    try:
+        with open(_req_path(bot), encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_requests(bot, reqs):
+    p = _req_path(bot)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    cutoff = datetime.now(timezone.utc).timestamp() - 7 * 86400
+    reqs = {k: v for k, v in reqs.items() if v.get("ts", cutoff + 1) > cutoff}
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(reqs, f, ensure_ascii=False)
+    os.replace(tmp, p)
+
+
+def _update_request(bot, rid, **fields):
+    reqs = load_requests(bot)
+    r = reqs.get(str(rid), {})
+    r.update(fields)
+    reqs[str(rid)] = r
+    _save_requests(bot, reqs)
+    return r
+
+
+def ask(bot, to, text, origin_tag=None, sender=None, reactor=None, wait=ASK_DEFAULT_WAIT, sleep=None,
+        clock=None):
+    """Tag bot `to` in General with a request; returns its answer (or status waiting after `wait` s)."""
+    import time as _t
+    sender, reactor = sender or send, reactor or react
+    clock = clock or _t.time
+    allb = all_bots()
+    if to == bot:
+        raise ValueError("a bot never tags itself")
+    if to not in allb:
+        raise ValueError(f"unknown bot '{to}' (main Kai is not asked through General; tell Omer instead)")
+    uname = allb[to].get("username")
+    if not uname:
+        raise ValueError(f"{to} has no username in config/bots.json")
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("empty request")
+    now = clock()
+    for k, v in load_tags(bot).items():
+        if v.get("from_bot") and v.get("state") in ("working", "waiting") and \
+                now - v.get("ts", 0) < DEPTH_HOURS * 3600:
+            raise ValueError(f"depth 1: you are answering a request from {v['from_bot']} (tag {k}); a bot never"
+                             " tags another bot while answering a bot. Answer with what you have.")
+    recent = [v for v in load_requests(bot).values() if now - v.get("ts", 0) < ASK_WINDOW_S]
+    if len(recent) >= ASK_MAX_PER_WINDOW:
+        raise ValueError(f"rate limit: {ASK_MAX_PER_WINDOW} requests to other bots in {ASK_WINDOW_S // 60} min")
+    chat = kai_bots.bot(bot).get("group_id")
+    mid = sender(bot, chat, f"@{uname} {text}", thread=None, reply_to=None, silent=False)
+    _update_request(bot, mid, to=to, text=text, chat=str(chat), ts=now, state="waiting",
+                    origin_tag=str(origin_tag) if origin_tag else None, answer=None, answer_msg=None, details=[])
+    if origin_tag:
+        try:
+            reactor(bot, chat, origin_tag, WAITING)
+        except Exception:
+            pass
+    if not wait:
+        return {"request_msg": mid, "to": to, "status": "waiting"}
+    return ask_wait(bot, mid, timeout=wait, sleep=sleep, clock=clock)
+
+
+def ask_wait(bot, rid, timeout=ASK_DEFAULT_WAIT, sleep=None, clock=None):
+    import time as _t
+    sleep, clock = sleep or _t.sleep, clock or _t.time
+    rid = str(rid)
+    start = clock()
+    wp = _waiter_path(bot, rid)
+    try:
+        os.makedirs(os.path.dirname(wp), exist_ok=True)
+        with open(wp, "w", encoding="utf-8") as f:
+            f.write(str(datetime.now(timezone.utc).timestamp() + float(timeout) + 5))
+    except Exception:
+        pass
+    while True:
+        r = load_requests(bot).get(rid)
+        if not r:
+            return {"request_msg": rid, "status": "unknown", "note": "no such request of this bot"}
+        if r.get("state") == "answered":
+            return {"request_msg": rid, "to": r.get("to"), "status": "answered", "answer": r.get("answer"),
+                    "answer_msg": r.get("answer_msg"), "details": [d.get("text") for d in r.get("details", [])]}
+        if clock() - start >= float(timeout):
+            return {"request_msg": rid, "to": r.get("to"), "status": "waiting",
+                    "note": f"no answer yet. Continue with `bot_tg.py ask-wait --bot {bot} --id {rid}`. A WhatsApp"
+                            " send waits for Omer's button in the WhatsApp bot's topic; never ask again"}
+        sleep(2)
+
+
+def _waiter_live(bot, rid):
+    try:
+        with open(_waiter_path(bot, rid), encoding="utf-8") as f:
+            return datetime.now(timezone.utc).timestamp() < float(f.read().strip())
+    except Exception:
+        return False
+
+
+def bot_inbound(bot, from_bot, attrs, content, reactor=None, dry_run=False):
+    """A message from ANOTHER of our bots. Returns the hook line, or None when it is a real tag of this bot
+    (then the normal General-tag path runs, with FROM_BOT)."""
+    reactor = reactor or _hook_react
+    mid = attrs.get("message_id", "?")
+    head = f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=NONE"
+    rt = attrs.get("reply_to_message_id")
+    req = load_requests(bot).get(str(rt)) if rt else None
+    if req and req.get("to") == from_bot:
+        body = (content or "").strip()
+        if body in (TEXT_ACK, VOICE_ACK) or body.startswith("🔄"):
+            return f"{head} reason=bot_ack (the other bot's ACK: nothing to do)"
+        if attrs.get("message_thread_id"):
+            if not dry_run:
+                _update_request(bot, rt, details=req.get("details", []) + [{"msg": mid, "text": body[:3000]}])
+            return f"{head} reason=bot_detail BOT_ANSWER_DETAIL request={rt} from={from_bot} (stored; do nothing)"
+        live = _waiter_live(bot, rt)
+        if not dry_run:
+            _update_request(bot, rt, state="answered", answer=body[:3000], answer_msg=mid)
+            if req.get("origin_tag"):
+                try:
+                    reactor(bot, req.get("chat") or attrs.get("chat_id"), req["origin_tag"], SEEN)
+                except Exception:
+                    pass
+        hint = ("the waiting `ask` has it: do NOTHING, no reply, no ACK" if live else
+                "nobody waits for it any more: if it finishes an open task of yours, finish that task in your"
+                " topic (never reply to the other bot); otherwise do nothing")
+        return (f"{head} reason=bot_answer BOT_ANSWER request={rt} from={from_bot}"
+                f" waiter={'live' if live else 'none'} ({hint})")
+    me = (kai_bots.bot(bot).get("username") or "").lower()
+    if not attrs.get("message_thread_id") and me and f"@{me}" in (content or "").lower():
+        now = datetime.now(timezone.utc).timestamp()
+        recent = [v for v in load_tags(bot).values() if v.get("from_bot") and now - v.get("ts", 0) < ASK_WINDOW_S]
+        if len(recent) >= BOT_TAGS_MAX_PER_WINDOW:
+            return f"{head} reason=bot_rate_limit BOT_CHATTER from={from_bot} (too many bot requests: ignore it)"
+        return None
+    return (f"{head} reason=bot_chatter BOT_CHATTER from={from_bot} (not a tag of you and not an answer to"
+            " you: ignore it, never reply)")
+
+
 def _hook_react(bot, chat, msg, emoji):
     return react(bot, chat, msg, emoji, timeout=HOOK_NET_TIMEOUT)
 
@@ -489,13 +688,31 @@ def auto_ack(bot, prompt, dry_run=False, sender=None, reactor=None):
     for attrs, content in main_ack.parse_channels(prompt):
         mid = attrs.get("message_id", "?")
         kind, val = ack_classify(bot, attrs, content)
+        if kind == "none" and val == "stranger":
+            lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=NONE reason=stranger (ignore it, no reply)")
+            continue
+        from_bot = bot_name_by_id(attrs.get("user_id"))
+        if from_bot == bot:
+            from_bot = None
+        if from_bot:
+            try:
+                bline = bot_inbound(bot, from_bot, attrs, content, reactor=reactor, dry_run=dry_run)
+            except Exception as e:
+                bline = (f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=NONE reason=bot_error ({type(e).__name__})"
+                         " BOT_CHATTER (ignore it)")
+            if bline is not None:
+                lines.append(bline)
+                continue
         gen = mid != "?" and is_general(bot, attrs)
         tag = f" GENERAL_TAG=1 TAG_MSG_ID={mid} WORK_THREAD_ID={own_topic(bot)}" if gen else ""
+        if gen and from_bot:
+            tag += f" FROM_BOT={from_bot}"
         if gen and not dry_run:
             seen_with_retry(bot, attrs.get("chat_id"), mid, reactor)
             if kind != "none":
                 try:
-                    _set_tag(bot, mid, chat=attrs.get("chat_id"), state="working")
+                    _set_tag(bot, mid, chat=attrs.get("chat_id"), state="working",
+                             **({"from_bot": from_bot} if from_bot else {}))
                 except Exception:
                     pass
         elif not dry_run and mid != "?" and kind != "none":
@@ -615,6 +832,18 @@ def main(argv):
         except Exception as e:
             log_react_failure(bot, _arg(argv, "--chat"), _arg(argv, "--msg"), _arg(argv, "--emoji", SEEN), e)
             print(f"[bot_tg] react failed: {e}")
+        return 0
+    if cmd in ("ask", "ask-wait"):
+        try:
+            if cmd == "ask":
+                out = ask(bot, _arg(argv, "--to"), _arg(argv, "--text"), origin_tag=_arg(argv, "--origin-tag"),
+                          wait=float(_arg(argv, "--wait", ASK_DEFAULT_WAIT)))
+            else:
+                out = ask_wait(bot, _arg(argv, "--id"), timeout=float(_arg(argv, "--timeout", ASK_DEFAULT_WAIT)))
+        except ValueError as e:
+            print(json.dumps({"error": str(e)}, ensure_ascii=False))
+            return 2
+        print(json.dumps(out, ensure_ascii=False, indent=1))
         return 0
     if cmd == "general-wait":
         print(general_wait(bot, _arg(argv, "--chat"), _arg(argv, "--tag-msg"), _arg(argv, "--question-msg")))

@@ -7,7 +7,8 @@ Exit 2 = the tool call is blocked, the reason (stderr) goes back to the model. E
 logged to <home>/bot.db table guard_log. Design: docs/multi_bot_separation_design.md, section 1 (L2).
 
 What it blocks for a bot whose config has no "whatsapp" capability:
-  - any WhatsApp access: MCP whatsapp tools, the bridge port, its DB files, its folder
+  - any WhatsApp access: MCP whatsapp tools, the bridge port, its DB files, its folder, WhatsApp scripts, and
+    (06/11/2026) the bus too: such a bot asks the WhatsApp bot visibly, with a General tag (bot_tg.py ask)
   - main Kai's private state: D:/Kai/.claude, the main Telegram token / state, main memory,
     the main-token Telegram scripts (fast/*, dispatch_start, tg_silent_send, tg_pin, log_ack...),
     restart / plugin patch scripts
@@ -45,8 +46,15 @@ BUS_CODE_ONLY = [
     r"bus\.py\W+(approve-hook|serve)\b", r"kaibots/_bus", r"\bbus\.db\b",
     r"/api/send\b", r"\bwa\.send\b", r"\bwhatsapp_send", r"\bimport\s+bus\b", r"from\s+bus\s+import",
 ]
-NO_WA_EXTRA = [r"bots/wa\.py", r"\bimport\s+wa\b", r"from\s+wa\s+import"]
+NO_WA_EXTRA = [r"bots/wa\.py", r"\bimport\s+wa\b", r"from\s+wa\s+import",
+               r"[a-z_]*_wa\.py\b", r"\bwhatsapp_[a-z_]+\.py\b"]
+# 06/11/2026 (Omer msgs 358 / 361, "חלוקת תפקידים טהורה"): a bot without WhatsApp has no hidden bus path
+# either. It asks the WhatsApp bot visibly, by tagging it in General (bot_tg.py ask).
+NO_WA_BUS = [r"bus\.py\W+(read|search|draft|wait|status|policy)\b"]
+ASK_HINT = ("WhatsApp is the WhatsApp bot's only. Ask it in General: "
+            "python D:/Kai/bots/bot_tg.py ask --bot <you> --to whatsapp --text \"<request>\"")
 IDENTITY_RE = re.compile(r"bus\.py\b.*?--(?:from|bot)[\s=]+[\"']?([a-z_]+)")
+BOT_TG_IDENTITY_RE = re.compile(r"bot_tg\.py\b.*?--bot[\s=]+[\"']?([a-z_]+)")
 SELF_PROTECT = [r"bots/guard\.py", r"config/bots\.json", r"\.claude/settings(\.local)?\.json", r"\.mcp\.json"]
 SELF_PROTECT_FILES = SELF_PROTECT + [r"d:/kai/bots/"]  # Write/Edit only: the shell must still run bots/bot_tg.py
 CONTACT_WRITE = re.compile(
@@ -80,7 +88,7 @@ def check(name, tool, tool_input, config_path=kai_bots.CONFIG):
     has_wa = "whatsapp" in caps(cfg)
     t = tool or ""
     if t.startswith("mcp__whatsapp") and not has_wa:
-        return "WhatsApp belongs to the WhatsApp bot. Ask through the bus (not built yet): tell Omer."
+        return ASK_HINT
     if t in SHELL_TOOLS:
         text = norm(tool_input.get("command", ""))
         is_write = True
@@ -92,13 +100,16 @@ def check(name, tool, tool_input, config_path=kai_bots.CONFIG):
     rules = []
     if not has_wa:
         rules += [(p, "WhatsApp is the WhatsApp bot's only (bridge, its DBs, its scripts)") for p in WHATSAPP]
-        rules += [(p, "WhatsApp is the WhatsApp bot's only: use bus.py read / search / draft") for p in NO_WA_EXTRA]
+        rules += [(p, ASK_HINT) for p in NO_WA_EXTRA + NO_WA_BUS]
     rules += [(p, "bus approvals / executor / sends are code-only (Omer's button + KaiBusServe)")
               for p in BUS_CODE_ONLY]
     if t in SHELL_TOOLS:
         for who in IDENTITY_RE.findall(text):
             if who != name:
                 return f"a bot may use the bus only as itself (--from/--bot {name}, not {who})"
+        for who in BOT_TG_IDENTITY_RE.findall(text):
+            if who != name:
+                return f"a bot may use bot_tg.py only as itself (--bot {name}, not {who})"
     rules += [(p, "main Kai's private state / main-token scripts") for p in MAIN_STATE]
     rules += [(p, "another bot's home") for p in other_homes(name, config_path)]
     if is_write:

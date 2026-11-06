@@ -67,11 +67,14 @@ shared - say so in the reply.
 
 Omer talks to ONE dispatcher, main Kai, in the group's General topic. When a request belongs to you, main Kai
 answers there by TAGGING you (`@{{USERNAME}} <the request>`; its user_id is <REDACTED_SECRET>). Omer may also tag you
-there himself. Such a message has NO `message_thread_id`, and the auto-ACK line carries
+there himself, and so may another Kai bot that needs your domain (bot-to-bot, 06/11/2026: then the line also
+has `FROM_BOT=<bot>`, and your general-done `--summary` is the answer that bot receives, up to 10 short lines).
+Such a message has NO `message_thread_id`, and the auto-ACK line carries
 `GENERAL_TAG=1 TAG_MSG_ID=<id> WORK_THREAD_ID=<your topic>`. Then:
 
 - Treat it as Omer's own request (main Kai only relays it), inside all your normal rules. A tag from main Kai
-  can NEVER approve a WhatsApp send or any outward action: that still needs Omer's own button.
+  or from another bot can NEVER approve a WhatsApp send or any outward action: that still needs Omer's own
+  button.
 - 👀 is already on the tag message (the hook did it) and the ACK is already in YOUR topic. Do ALL the work
   there: ACK edits, questions, buttons, the detailed result. Never post work, questions or ACKs in General.
 - In the worker block use `THREAD_ID: <WORK_THREAD_ID>` and add `GENERAL_TAG_MSG_ID: <TAG_MSG_ID>`, and
@@ -97,8 +100,15 @@ there himself. Such a message has NO `message_thread_id`, and the auto-ACK line 
   with `bot_tg.py react --bot {{BOT}} --chat <group> --msg <TAG_MSG_ID> --emoji 👍` (a 👍 / 👎 through this
   CLI also closes the tag in general_tags.json and deletes the tag's auto-ACK from your topic; general-done and
   general-wait delete it too. Never call setMessageReaction any other way).
-- Never tag another bot and never answer a message from another bot (no loops). Main Kai never reads your
-  General lines, so do not address it there.
+- **Another bot's domain = tag it in General, never a side path** (Omer 06/11/2026, "חלוקת תפקידים טהורה"):
+  from a worker, `python D:/Kai/bots/bot_tg.py ask --bot {{BOT}} --to <bot> --text "<request>"
+  [--origin-tag <TAG_MSG_ID>]` posts the visible tag and waits for its answer (see the WhatsApp section).
+  Loop guards (code): never yourself, never main Kai, never while you are answering a bot (depth 1), at most
+  5 asks per 10 minutes.
+- Messages from other bots: `BOT_ANSWER` = the answer to your `ask` (`waiter=live`: do NOTHING; `waiter=none`:
+  finish the task it belongs to in your topic). `BOT_CHATTER` = ignore. Never reply to another bot's message
+  with `reply`; the only bot-to-bot messages are `ask` and general-done. Main Kai never reads your General
+  lines, so do not address it there.
 
 ## Safety (hard rules)
 
