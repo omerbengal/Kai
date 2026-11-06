@@ -1,5 +1,10 @@
 # Multi-bot stage 3 - main Kai as the one dispatcher in the group (05/11/2026, DESIGN ONLY, not built)
 
+> **Revised 06/11/2026 (Omer msgs 22573, 22581).** Two changes: (a) Telegram DOES support bot-to-bot messages
+> since Bot API 10.0 (08/05/2026), so the 05/11 claim "a bot never sees another bot's message" was outdated and
+> the local inbox (`kaiInbox` patch, bus kind `task`) is dropped; (b) the handoff is a TAG in General plus
+> reactions, not a 📋 post in the topic. Sections 0, 1, 2 and 6 below are the revised version; 3-5 still apply.
+
 Omer (voice, msg 22485): "אני רוצה לדבר רק עם דיספאצ'ר אחד, שזה אתה". In the group "<bots group>"
 (`<group-id>`):
 - a message in a bot's topic (🫡 2, 💬 121, 📈 117) - that topic's bot handles it, exactly as today;
@@ -13,8 +18,11 @@ Read first: `docs/multi_bot_separation_design.md` (s.3 bus, s.4 main after the s
 
 | fact | consequence |
 |---|---|
-| Telegram never delivers a bot's message to another bot (also with privacy off) | a visible post by main Kai in a topic can NOT wake the bot. A real local channel is needed. |
-| Bot sessions are woken only by their Telegram plugin's channel notifications | the bus alone (a DB row) cannot start a turn in a bot's Claude session |
+| ~~Telegram never delivers a bot's message to another bot~~ WRONG since Bot API 10.0 (08/05/2026, checked 06/11 in core.telegram.org/bots/api-changelog + /bots/features): BotFather setting "Bot-to-Bot Communication Mode". In a group a bot gets another bot's message that mentions it or replies to it if at least ONE of the two has the mode on; with the mode on + privacy off (or admin) it gets every bot message. Off by default; `getMe` does not show it. Telegram asks for loop protection (rate / depth limits) | main Kai's message in General that tags `@<bot>` wakes that bot directly through its normal plugin. No local channel needed. |
+| The 3 domain bots: privacy OFF (`getMe` can_read_all_group_messages=true, 06/11); main bot: privacy ON | the bots already see bot messages once the mode is on; main needs admin (s.3) to see Omer in General |
+| Bots' plugin gate (kaiTopics, server.ts): a General message is delivered when it MENTIONS the bot even though `topics` lists only its thread; but group `allowFrom` is `["${KAI_TELEGRAM_CHAT_ID}"]` only | add main's bot id `<REDACTED_SECRET>` to each bot's group `allowFrom`; no gate code change for the tag itself |
+| `setMessageReaction`: a bot can react to any message in the chat (also another bot's), a new call replaces the bot's reaction, no paid reactions. ReactionTypeEmoji is a fixed list of 73: 👀 IS in it, ✅ is NOT | "done" reaction = 👌 (alternatives 💯 / 🏆 / 👍), not ✅ |
+| Bot sessions are woken only by their Telegram plugin's channel notifications | the tag is a real channel notification, so this is covered |
 | main access.json: `groups: {}` | main Kai drops every group message today |
 | main bot privacy mode ON (stage 1) | in a group it would see only commands / mentions / replies to it |
 | General topic: `is_topic_message` false, no `message_thread_id` (thread 1 is implicit) | the kaiTopics gate maps it to `"general"`; replies there are sent WITHOUT a thread id |
@@ -26,14 +34,50 @@ Read first: `docs/multi_bot_separation_design.md` (s.3 bus, s.4 main after the s
 ```
 Omer in General ──> main Kai (dispatcher, same listener.md)
                      ├─ personal / general (reminder, calendar, question) ──> answers in General (see s.4)
-                     └─ domain (registration-system, WhatsApp, trading) ──> bus task ──> 📋 post in the topic + inbox ──> domain bot
+                     └─ domain (registration-system, WhatsApp, trading) ──> tag message in General ──> domain bot (s.2)
 Omer in a topic  ──> that topic's bot (unchanged)
 Omer in private  ──> main Kai (unchanged)
 ```
 Routing rule = the domain table in `config/bots.json` (each bot's domain line) read by the dispatcher; when unsure,
 main asks ONE question in General with a button per bot.
 
-## 2. The handoff: visible post + real request (one code path)
+## 2. The handoff: a tag in General + reactions (revised 06/11, Omer msg 22581)
+
+Flow:
+1. Omer writes in General.
+2. Main Kai (dispatcher) decides it belongs to a domain bot and posts in General, as a reply to Omer's message,
+   `@<bot username> <Omer's request, verbatim or lightly cleaned>`. No "העברתי ל..." text: the tag IS the handoff.
+3. The bot's plugin delivers it (mention in General + sender `<REDACTED_SECRET>` in allowFrom). The bot immediately sets
+   👀 on the tag message (`setMessageReaction`, the plugin's `react` tool).
+4. All the work happens in the bot's OWN topic: auto-ACK, progress edits, questions with buttons, typing. The
+   first message there links to the tag message.
+5. Done: the bot (a) replaces 👀 with 👌 on the tag message, (b) posts a detailed summary in its topic, (c) posts a
+   VERY short summary in General as a reply to the tag message (one line, at most ~15 words, plus a t.me link
+   to the detailed one). Omer: "הודעת הסיכום צריכה להיות ממש קצרה".
+6. Failure: the bot sets 👎 (or 😢) instead of 👌 and the one-line General summary says what failed.
+
+What needs code (not built):
+- Each bot's group `allowFrom` gets main's id `<REDACTED_SECRET>` (access.json, after Omer's button).
+- Bot side ("General task" mode): the bot's `auto_ack` hook today replies to the incoming message, which would put
+  the ACK in General. When the incoming message is in General (no thread) from `<REDACTED_SECRET>`, the ACK, typing and
+  all replies go to the bot's topic (`message_thread_id` = its topic, no reply_to), and only the final one-line
+  summary goes to General. The bot's CLAUDE.md gets one line: a tag from main Kai in General is Omer's request
+  relayed - act on it as his, inside the bot's normal rules, with the 👀 / 👌 / short-summary protocol.
+- Main side: the dispatcher's General route = one reply with the tag (no worker needed for the handoff itself).
+
+Safety:
+- The tag's sender is main's bot id, not Omer's, so `bus.py approve-hook` can never approve a WhatsApp send from
+  it: a send asked via main still needs Omer's button in the bot's topic.
+- No loop: main's General entry has `allowFrom: ["${KAI_TELEGRAM_CHAT_ID}"]`, so the bots' short summaries never reach main;
+  a bot acts on a bot message only if it is from `<REDACTED_SECRET>` AND mentions it, and never tags another bot.
+- Telegram's loop guidance: the bot handles at most one main-Kai tag per few seconds and ignores duplicates of
+  the same message id.
+- If the bot is down (no live bot.pid), main Kai does not tag it and replies `⚠️ קאי X לא זמין` in General.
+  Main cannot watch for the 👀 itself: Telegram sends no `message_reaction` update for reactions set by bots.
+
+Omer can also tag a bot in General himself; the same gate delivers it (sender = Omer) and the same protocol runs.
+
+### Superseded 05/11 version (kept for history, NOT to build)
 
 New bus kind `task` (`bots/bus.py`), created only by main Kai:
 `bus.py task --to trading --text "<Omer's request, verbatim or lightly cleaned>" --origin <general msg id>`
@@ -96,17 +140,21 @@ Yes. Reminders, the morning briefing, heartbeat alerts, the trading watchers and
 there today, and it is the fallback when the group or a bot is broken. Omer can simply stop writing there; nothing
 needs it to be used.
 
-## 6. Steps (each one alone, each reversible)
+## 6. Steps (revised 06/11; each one alone, each reversible)
 
-1. Bus kind `task` + 📋/📤 posts + `inbox/` files, guard rule for `inbox/`, tests (two fake bots). No live effect.
-2. Patch `kaiInbox` in the plugin (KAI_BOT only), tests like `test_patch_telegram_topics.py`; restart each
-   bot only when idle (principles.md s.4) to load it; live test: `bus.py task --to trading` from the shell.
-3. Omer: make main Kai an admin in the group (one tap). Then main access.json gets the General entry.
+1. Omer: turn on "Bot-to-Bot Communication Mode" in BotFather for main Kai and the 3 bots, and make main Kai an
+   admin of the group (one tap). Live check from the shell: main token posts `@<bot> בדיקה` in General, the bot's
+   plugin log shows the delivery.
+2. Bot side "General task" mode: each bot's group `allowFrom` + `<REDACTED_SECRET>`; bots' auto_ack / typing route to the
+   own topic for a General tag from main; 👀 on receipt, 👌 (or 👎) + one-line General summary + detailed topic
+   summary at the end; CLAUDE.md line in `bots/_template` + the 3 bots; tests (fake update in General from main,
+   fake update from another bot = dropped). Restart each bot only when idle (principles.md s.4).
+3. Main access.json gets the General entry (s.3).
 4. `messages.chat_id` + `--chat_id` in auto_ack / dispatch_start / tg_pin / worker protocol; listener.md section
-   "General topic" (routing table, phase A rules).
+   "General topic" (routing table, the tag handoff, phase A rules).
 5. Main Kai restart (05:00 night start, or Omer's own "ריסטארט") loads kaiTopics; live test in General: one
    personal question, one domain request.
 6. Phase B only on Omer's request.
 
-Rollback: remove the General entry from main access.json (main drops the group again); bus `task` and the
-inbox stay harmless when unused.
+Rollback: remove the General entry from main access.json (main drops the group again) and `<REDACTED_SECRET>` from the
+bots' allowFrom; turning the BotFather mode off stops all bot-to-bot delivery.
