@@ -224,5 +224,56 @@ class TypingLeaseTest(unittest.TestCase):
         self.assertEqual(lp.lease_state(77), "exit")
 
 
+    # --- General topic of the bots group (06/11/2026, Omer msg 22689) ------------------------------
+    def test_lease_keeps_thread(self):
+        tl.open_lease("-100777", msg_id="5", thread_id="1")
+        self.assertEqual((self.lease()["chat_id"], self.lease()["thread_id"]), ("-100777", "1"))
+        tl.open_lease("${KAI_TELEGRAM_CHAT_ID}", msg_id="6")
+        self.assertEqual((self.lease()["chat_id"], self.lease()["thread_id"]), ("${KAI_TELEGRAM_CHAT_ID}", None))
+
+    def test_reply_to_one_chat_resumes_in_the_other(self):
+        tl.open_lease("${KAI_TELEGRAM_CHAT_ID}", msg_id="40")
+        tl.renew("Agent", {})
+        tl.end_turn()
+        tl.open_lease("-100777", msg_id="41", thread_id="1")
+        tl.renew("Agent", {})
+        tl.end_turn()
+        tl.pause(reply_to="41")                   # General worker done; the private worker still busy
+        self.assertEqual((self.lease()["chat_id"], self.lease()["thread_id"]), ("${KAI_TELEGRAM_CHAT_ID}", None))
+        self.assertGreater(self.lease()["resume_at"], time.time())
+
+    def test_loop_follows_the_lease_target(self):
+        import typing_loop as lp
+        self.assertEqual(lp.lease_target({"chat_id": "-100777", "thread_id": "1"}, "${KAI_TELEGRAM_CHAT_ID}"),
+                         ("-100777", "1"))
+        self.assertEqual(lp.lease_target({"chat_id": "${KAI_TELEGRAM_CHAT_ID}"}, "x"), ("${KAI_TELEGRAM_CHAT_ID}", None))
+        self.assertEqual(lp.lease_target(None, "${KAI_TELEGRAM_CHAT_ID}"), ("${KAI_TELEGRAM_CHAT_ID}", None))
+
+    def test_send_typing_passes_thread(self):
+        import typing_loop as lp
+        urls = []
+        real = lp.urllib.request.urlopen
+
+        class R:
+            def read(self):
+                return b'{"ok":false}'
+        lp.urllib.request.urlopen = lambda url, timeout=None: urls.append(url) or R()
+        try:
+            lp.send_typing("-100777", "1")
+            lp.send_typing("${KAI_TELEGRAM_CHAT_ID}")
+        finally:
+            lp.urllib.request.urlopen = real
+        self.assertIn("message_thread_id=1", urls[0])
+        self.assertNotIn("message_thread_id", urls[1])
+
+    def test_session_start_target_general_uses_thread_1(self):
+        import typing_session_start as ts
+        import auto_ack
+        g = auto_ack.GENERAL_CHAT_ID
+        self.assertEqual(ts.target({"chat_id": g}), (g, "1"))
+        self.assertEqual(ts.target({"chat_id": g, "message_thread_id": "7"}), (g, "7"))
+        self.assertEqual(ts.target({"chat_id": "${KAI_TELEGRAM_CHAT_ID}"}), ("${KAI_TELEGRAM_CHAT_ID}", None))
+
+
 if __name__ == "__main__":
     unittest.main()

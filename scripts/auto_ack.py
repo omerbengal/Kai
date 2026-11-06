@@ -9,9 +9,13 @@ saw nothing. Now the hook sends it the moment the prompt is submitted and tells 
 For every <channel source="plugin:telegram:telegram" ...> block in the prompt (a burst can carry several):
   - reaction (event_type="reaction")              -> no ACK
   - strict trivial allow-list (listener.md Step 0) -> no ACK (dispatcher answers directly)
-  - other chat than Omer's DM                      -> no ACK
+  - other chat than Omer's DM / the bots group's General topic -> no ACK
   - voice / audio attachment                       -> "🎤 מתמלל... ⏳"
   - everything else (text, photo, document, callback) -> "🔄 ⏳"
+General topic (06/11/2026, Omer msg 22689): Omer's messages in the bots group's General topic (group id from
+config/bots.json, no message_thread_id) get the same ACK, sent in General (reply to his message, no thread).
+Group message ids collide with private ones, so that ACK gets NO `messages` row and its registry key is
+prefixed (g_msg_<id>); the output line adds chat_id=<group> so the dispatcher edits/deletes it there.
 Callbacks get an ACK: listener.md treats them like messages and every inline callback path
 already deletes its ACK (Step shortening rule 3).
 
@@ -38,6 +42,17 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 OMER_CHAT_ID = os.environ.get("KAI_TELEGRAM_CHAT_ID", "")
+
+
+def _general_chat_id():
+    try:
+        with open("D:/Kai/config/bots.json", encoding="utf-8") as f:
+            return str(json.load(f)["group_id"])
+    except Exception:
+        return "-1004297864522"
+
+
+GENERAL_CHAT_ID = _general_chat_id()   # the bots group; its General topic = no message_thread_id
 TEXT_ACK = "🔄 ⏳"
 VOICE_ACK = "🎤 מתמלל... ⏳"
 REGISTRY_DIR = "D:/Kai/tmp/auto_ack"
@@ -80,11 +95,16 @@ def parse_channels(prompt):
     return out
 
 
+def is_general(attrs):
+    """Omer's message in the bots group's General topic (main Kai is the dispatcher there)."""
+    return attrs.get("chat_id") == GENERAL_CHAT_ID and not attrs.get("message_thread_id")
+
+
 def classify(attrs, content):
     """('none', reason) or ('ack', ack_text)."""
     if attrs.get("event_type") == "reaction" or re.match(r"^\[reaction on message \d+\]", content):
         return ("none", "reaction")
-    if attrs.get("chat_id") and attrs.get("chat_id") != OMER_CHAT_ID:
+    if attrs.get("chat_id") and attrs.get("chat_id") != OMER_CHAT_ID and not is_general(attrs):
         return ("none", "other_chat")
     if not attrs.get("message_id"):
         return ("none", "no_message_id")
@@ -103,7 +123,9 @@ def registry_key(attrs):
         # A callback carries the id of the bot message with the buttons: two presses share it.
         raw = f"cb_{mid}_{attrs.get('callback_data', '')}_{attrs.get('ts', '')}"
         return re.sub(r"[^\w.-]", "_", raw)[:150]
-    return f"msg_{re.sub(r'[^0-9]', '', mid)}"
+    key = f"msg_{re.sub(r'[^0-9]', '', mid)}"
+    chat = attrs.get("chat_id")
+    return key if not chat or chat == OMER_CHAT_ID else "g_" + key   # group ids collide with private
 
 
 def _prune():
@@ -139,11 +161,12 @@ def claim(key):
         return False, existing
 
 
-def send_ack(text, reply_to):
+def send_ack(text, reply_to, chat_id=OMER_CHAT_ID):
     import net_ipv4  # noqa: F401  IPv6 to Telegram is broken here
     import tg_silent_send
     import urllib.request
-    payload = {"chat_id": OMER_CHAT_ID, "text": text, "disable_notification": True,
+    chat_id = str(chat_id or OMER_CHAT_ID)
+    payload = {"chat_id": chat_id, "text": text, "disable_notification": True,
                "reply_parameters": {"message_id": int(reply_to), "allow_sending_without_reply": True}}
     req = urllib.request.Request(
         f"https://api.telegram.org/bot{tg_silent_send.BOT_TOKEN}/sendMessage",
@@ -155,6 +178,8 @@ def send_ack(text, reply_to):
     if not data.get("ok"):
         raise RuntimeError(str(data)[:200])
     mid = int(data["result"]["message_id"])
+    if chat_id != OMER_CHAT_ID:
+        return mid  # group: no `messages` row (ids collide with private ones; it has no chat column)
     try:
         tg_silent_send.save(mid, text)  # same `messages` row as every ACK (deletion by id)
     except Exception:
@@ -178,16 +203,19 @@ def handle(prompt, dry_run=False):
         except Exception:
             owned, info = True, None  # registry broken: still send, a double ACK beats none
         if not owned:
-            lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID={info or 'FAILED'} (already sent)")
+            gen = f" chat_id={attrs.get('chat_id')}" if is_general(attrs) else ""
+            lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID={info or 'FAILED'}{gen} (already sent)")
             continue
         try:
-            ack_id = send_ack(val, mid)
+            chat = attrs.get("chat_id") or OMER_CHAT_ID
+            ack_id = send_ack(val, mid, chat_id=chat)
             try:
                 with open(info, "w", encoding="utf-8") as f:
                     f.write(str(ack_id))
             except Exception:
                 pass
-            lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID={ack_id}")
+            where = f" chat_id={chat}" if chat != OMER_CHAT_ID else ""
+            lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID={ack_id}{where}")
         except Exception as e:
             try:
                 if info:

@@ -21,6 +21,7 @@ import os
 import json
 import re
 import subprocess
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 def _tlog(event, extra=""):
     """Timestamped trace of typing-hook activity (investigation: missing indicator)."""
@@ -37,6 +38,25 @@ def _tlog(event, extra=""):
 CREATE_NO_WINDOW = 0x08000000
 START_TYPING = os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_typing.py")
 SESSION_KEY = "session"
+
+
+GENERAL_THREAD = "1"   # Bot API: typing inside a forum's General topic needs message_thread_id=1
+
+
+def target(attrs):
+    """(chat_id, thread_id) to type in. The bots group's General topic (no message_thread_id on Omer's
+    message) types with thread 1: without it Telegram shows "typing" only in the chat list, while the
+    topic header keeps its message counter (Omer msg 22689, 06/11/2026)."""
+    chat = attrs.get("chat_id")
+    thread = attrs.get("message_thread_id")
+    if not thread:
+        try:
+            import auto_ack
+            if chat == auto_ack.GENERAL_CHAT_ID:
+                thread = GENERAL_THREAD
+        except Exception:
+            pass
+    return chat, thread
 
 
 def main():
@@ -85,8 +105,9 @@ def main():
             ack_key = auto_ack.registry_key(chans[0][0])
     except Exception:
         pass
-    open_lease(chat_id, msg_id=attr("message_id"), ack_key=ack_key)
-    _tlog("LEASE-OPEN", "chat_id=" + chat_id + " msg=" + str(attr("message_id")))
+    _, thread = target({"chat_id": chat_id, "message_thread_id": attr("message_thread_id")})
+    open_lease(chat_id, msg_id=attr("message_id"), ack_key=ack_key, thread_id=thread)
+    _tlog("LEASE-OPEN", "chat_id=" + chat_id + " thread=" + str(thread) + " msg=" + str(attr("message_id")))
 
 
 if __name__ == "__main__":

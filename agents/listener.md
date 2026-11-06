@@ -15,8 +15,20 @@ The `ORIGINAL_MSG_ID` is the `message_id` from the incoming `<channel>` tag. Eve
 A `<channel>` with `chat_id="<group-id>"` (group "<bots group>") and no `message_thread_id` is Omer writing in
 the group's **General** topic. Main Kai is the ONE dispatcher there (`docs/multi_bot_stage3_main_dispatcher.md`).
 Only Omer's General messages reach main (access.json `topics: ["general"]`, `allowFrom` = Omer); the bots'
-topics and the bots' own lines never do. In General there is **no auto-ACK** (`auto_ack.py` is private-only),
-so this section replaces Step −2 / Step shortening for these messages:
+topics and the bots' own lines never do. **Auto-ACK works in General too** (06/11/2026, Omer msg 22689):
+`auto_ack.py` sends `🔄 ⏳` / `🎤 מתמלל... ⏳` silently IN General (reply to his message, no thread) and injects
+`AUTO_ACK message_id=X AUTO_ACK_MSG_ID=<id> chat_id=<group-id>`. That ACK has NO `messages` row (group ids
+collide with private ones), and typing shows inside General (`typing_session_start.py` types with
+message_thread_id=1). Same exclusions as private: no ACK for reactions or the Step 0 trivial list. Every use of
+that ACK passes `chat_id=<group-id>`; it is deleted with `deleteMessage` on that chat_id, never by `messages`
+row. This section replaces Step −2 / Step shortening for these messages:
+
+0. **Voice in General:** download the attachment, then
+   `python D:/Kai/scripts/transcribe.py <path> --ack_id <AUTO_ACK_MSG_ID> --chat_id <group-id>` (it edits
+   the General ACK to the transcription and touches no DB row); continue with the transcription as the text.
+   **Tag path (1) with an auto-ACK:** delete the ACK (deleteMessage on the group chat_id) in the same block as
+   the `tag` call - the bot's 👀 is the status from there on. **Inline path (3):** final `reply` + ACK delete
+   in one parallel block, as in private.
 
 1. **Domain request → tag the bot.** `python D:/Kai/scripts/general_handoff.py routes` prints the bots and
    their domains (each bot's domain line). If it belongs to one of them, ONE call and stop:
@@ -31,8 +43,9 @@ so this section replaces Step −2 / Step shortening for these messages:
    question message to `‏✅ הועבר`.
 3. **Personal / general** (not a bot's domain): Options A/B/C/C2 answer inline in General (`reply` with the
    group chat_id, `reply_to`, no thread). Anything bigger → the worker path with the ACK IN General:
-   `dispatch_start.py --chat_id <group-id> --reply_to <message_id> --title "<summary>"` (**no `--pin`**:
-   tg_pin is private-only), then the worker with `NOTES: CHAT_ID=<group-id> (General topic): every
+   `dispatch_start.py --chat_id <group-id> --ack_id <AUTO_ACK_MSG_ID> --title "<summary>"` (on `FAILED` /
+   no AUTO_ACK line: `--reply_to <message_id>` instead of `--ack_id`; **no `--pin`**: tg_pin is private-only,
+   and the script writes no messages / ack_log row for the group), then the worker with `NOTES: CHAT_ID=<group-id> (General topic): every
    reply / edit_message uses this chat_id and no message_thread_id; skip tg_pin and log_ack; delete the ACK
    with deleteMessage on this chat_id and do NOT delete its messages row (group ids collide with private
    ones)`. **No fast script (Option D) from General**: they answer in the private chat only; the worker does

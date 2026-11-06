@@ -190,15 +190,19 @@ def _remove_lease():
         pass
 
 
-def open_lease(chat_id, msg_id=None, ack_key=None):
-    """New incoming message: the ONLY thing that opens the indicator / clears a pause. Opens a task."""
+def open_lease(chat_id, msg_id=None, ack_key=None, thread_id=None):
+    """New incoming message: the ONLY thing that opens the indicator / clears a pause. Opens a task.
+    thread_id: forum topic to type in (General of the bots group = "1", 06/11/2026). The running loop reads
+    chat_id / thread_id from the lease before every send, so a new message in another chat moves typing there."""
     now = time.time()
     with _Lock():
         old = _read() or {}
         tasks = _tasks(old, now)
         if msg_id:
-            tasks[str(msg_id)] = {"opened": now, "handed": False, "ack_key": ack_key, "replied_at": 0}
-        lease = {"chat_id": str(chat_id), "deadline": now + LEASE_SECONDS,
+            tasks[str(msg_id)] = {"opened": now, "handed": False, "ack_key": ack_key, "replied_at": 0,
+                                  "chat_id": str(chat_id), "thread_id": str(thread_id) if thread_id else None}
+        lease = {"chat_id": str(chat_id), "thread_id": str(thread_id) if thread_id else None,
+                 "deadline": now + LEASE_SECONDS,
                  "turn_open": True, "dispatcher_turn": True, "pid": old.get("pid", 0) or 0,
                  "paused_at": 0, "resume_at": 0, "tasks": tasks}
         lease = _ensure_loop(lease)
@@ -297,6 +301,10 @@ def pause(wait_expire=False, reply_to=None):
                 others = [k for k, t in tasks.items() if k != str(reply_to) and t.get("handed")]
                 if others:           # another worker is still busy: typing back after the reply
                     lease["resume_at"] = now + RESUME_DELAY
+                    last = max(others, key=lambda k: float(tasks[k].get("opened", 0) or 0))
+                    if tasks[last].get("chat_id"):   # ...in that task's chat / topic
+                        lease["chat_id"] = tasks[last]["chat_id"]
+                        lease["thread_id"] = tasks[last].get("thread_id")
             lease["tasks"] = tasks
             _write(lease)
     _wait_no_inflight()
@@ -334,7 +342,7 @@ def end_turn():
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "open" and len(sys.argv) > 2:
-        open_lease(sys.argv[2])
+        open_lease(sys.argv[2], thread_id=sys.argv[3] if len(sys.argv) > 3 else None)
     elif cmd == "renew":
         renew()
     elif cmd == "pause":

@@ -142,6 +142,9 @@ def main():
             status = "⏳ מייצר agent..."
         args.text = f"🔄 {args.title} — {status}"
 
+    # Group (General topic, 06/11/2026): its ids collide with private ones -> no messages / ack_log row
+    # (stale_ack.py edits ack_log ids in the private chat). Pin is private-only too (tg_pin).
+    private = str(args.chat_id) == "${KAI_TELEGRAM_CHAT_ID}"
     mid = None
     if args.no_ack:
         print("ACK_MSG_ID=NONE")
@@ -156,7 +159,8 @@ def main():
         try:
             mid = tg_silent_send.send(args.chat_id, args.text, args.reply_to)
             try:
-                tg_silent_send.save(mid, args.text)
+                if private:
+                    tg_silent_send.save(mid, args.text)
             except Exception as e:
                 print(f"dispatch_start: DB save failed: {e}", file=sys.stderr)
             print(f"ACK_MSG_ID={mid}")
@@ -165,12 +169,12 @@ def main():
             print("ACK_MSG_ID=FAILED")
             mid = None
 
-    if mid and args.title:
+    if mid and args.title and private:
         try:
             log_ack(mid, "sent", args.text)
         except Exception as e:
             print(f"dispatch_start: ack_log failed: {e}", file=sys.stderr)
-    if mid and args.pin:
+    if mid and args.pin and private:
         tg_pin.pin_ack(mid, args.chat_id)  # best-effort, never raises
 
     if args.no_context:

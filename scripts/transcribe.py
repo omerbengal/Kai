@@ -171,6 +171,12 @@ ACK_TEXT = "🎤 מתמלל... ⏳"
 ACK_MAX_AGE_MINUTES = 10
 
 
+def ack_in_private_chat(chat_id):
+    """Only a private-chat ACK has a `messages` row. A group ACK (General topic, 06/11/2026) has none and its
+    id collides with private ids, so it is never looked up or written there."""
+    return str(chat_id) == "${KAI_TELEGRAM_CHAT_ID}"
+
+
 def find_recent_ack():
     """
     Locate the "transcribing..." message this run is almost certainly for.
@@ -225,7 +231,7 @@ if __name__ == "__main__":
     text = transcribe(args.audio_path)
 
     ack_id = args.ack_id
-    if not ack_id and not args.no_ack_lookup:
+    if not ack_id and not args.no_ack_lookup and ack_in_private_chat(args.chat_id):
         ack_id = find_recent_ack()
         if ack_id:
             print("[transcribe] --ack_id missing; edited recovered ACK %s" % ack_id,
@@ -234,6 +240,8 @@ if __name__ == "__main__":
     if ack_id:
         tg_edit(args.chat_id, ack_id, f'\u200F🎤 "{text}"')
         try:
+            if not ack_in_private_chat(args.chat_id):
+                raise LookupError("group ACK: no messages row")
             import sqlite3
             conn = sqlite3.connect("D:/Kai/kai.db")
             # Also stops this row matching find_recent_ack() on the next voice message.

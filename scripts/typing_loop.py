@@ -50,8 +50,10 @@ def _record_last_send():
         pass
 
 
-def send_typing(chat_id):
+def send_typing(chat_id, thread_id=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendChatAction?chat_id={chat_id}&action=typing"
+    if thread_id:   # forum topic; the bots group's General = 1 (without it typing shows only in the chat list)
+        url += f"&message_thread_id={thread_id}"
     try:
         body = urllib.request.urlopen(url, timeout=3).read().decode("utf-8", "replace")
         _tlog("send", body[:60])
@@ -76,6 +78,14 @@ def _read_lease():
             return json.load(f)
     except Exception:
         return None
+
+
+def lease_target(lease, default_chat):
+    """(chat_id, thread_id) to type in: the lease's current target (it moves to the chat of the newest
+    message, 06/11/2026), else the chat this loop was started with."""
+    if lease and lease.get("chat_id"):
+        return str(lease["chat_id"]), (str(lease["thread_id"]) if lease.get("thread_id") else None)
+    return str(default_chat), None
 
 
 def lease_claims_me(my_pid):
@@ -203,7 +213,7 @@ def main():
             if st == "exit":
                 return False
             if st == "send":
-                send_typing(chat_id)
+                send_typing(*lease_target(_read_lease(), chat_id))
             return True
         finally:
             try:

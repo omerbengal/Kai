@@ -128,3 +128,10 @@ def test_read_timeout_scales_with_audio_length(tmp_path):
     long_.write_bytes(b"\0" * 600000)       # ~200s
     assert T.local_read_timeout(str(short)) == 5.0
     assert T.local_read_timeout(str(long_)) == pytest.approx(60.0)
+
+
+def test_group_ack_never_touches_messages_rows():
+    # General topic (06/11/2026): group message ids collide with private ones, so a group ACK is never
+    # looked up in / written to the `messages` table, and the private-ACK lookup is not used for it.
+    assert T.ack_in_private_chat("${KAI_TELEGRAM_CHAT_ID}") is True
+    assert T.ack_in_private_chat("-1004297864522") is False
