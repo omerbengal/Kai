@@ -364,8 +364,9 @@ def loop(p, sender=send_typing, sleep=time.sleep):
     _tlog(p, "LOOP-END", f"sends={sends}")
 
 
-def parse_open(prompt, group_id):
-    """(chat_id, thread_id) of the first channel message that should show typing, else None."""
+def parse_open(prompt, group_id, own_topic=None):
+    """(chat_id, thread_id, msg_id) of the first channel message that should show typing, else None.
+    A General message (a tag from main Kai, stage 3) types in the bot's own topic, where the work happens."""
     for m in re.finditer(r"<channel([\s\S]*?)>", prompt or ""):
         attrs = m.group(1)
 
@@ -377,7 +378,10 @@ def parse_open(prompt, group_id):
         chat = attr("chat_id")
         if chat not in {str(group_id), OMER_DM}:
             continue
-        return chat, attr("message_thread_id"), attr("message_id")
+        thread = attr("message_thread_id")
+        if not thread and chat == str(group_id) and own_topic:
+            thread = str(own_topic)
+        return chat, thread, attr("message_id")
     return None
 
 
@@ -403,7 +407,9 @@ def main(argv):
                 data = {}
         if cmd == "open":
             import kai_bots
-            hit = parse_open(data.get("prompt", "") or data.get("content", ""), kai_bots.bot(bot).get("group_id"))
+            bcfg = kai_bots.bot(bot)
+            hit = parse_open(data.get("prompt", "") or data.get("content", ""), bcfg.get("group_id"),
+                             own_topic=(bcfg.get("topics") or [None])[0])
             if hit:
                 open_lease(p, hit[0], hit[1], msg_id=hit[2])
         elif cmd == "renew":

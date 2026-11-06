@@ -21,6 +21,15 @@ CLI:
   bot_tg.py save --bot miluim --mode incoming|outgoing   (hooks; JSON on stdin)
   bot_tg.py delete --bot miluim --chat C --msg M      delete a message (the ACK) + its row
   bot_tg.py pin|unpin --bot miluim --chat C --msg M   silent pin / unpin
+  bot_tg.py react --bot miluim --chat C --msg M --emoji 👀   set (replace) this bot's reaction
+  bot_tg.py general-done --bot miluim --chat C --tag-msg M --summary "..." [--fail] [--detail-msg D]
+                                                     end of a General task: 👍/👎 on the tag + ONE short line
+                                                     in General (reply to the tag) + link to the details
+
+General tasks (stage 3, 06/11/2026, docs/multi_bot_stage3_main_dispatcher.md s.2): a message in the
+group's General topic (no message_thread_id) reaches a bot only when it tags the bot (main Kai's handoff,
+or Omer) or replies to it. The auto-ACK hook then sets 👀 on it and puts the ACK in the bot's OWN topic;
+all the work happens there; `general-done` closes it.
 """
 import io
 import json
@@ -202,6 +211,11 @@ def send(bot, chat, text, thread=None, reply_to=None, silent=False, timeout=15):
 
 
 TEXT_ACK = "🔄 ⏳"
+SEEN = "👀"       # ReactionTypeEmoji is a fixed list (checked 06/11/2026): ✅ and skin tones are NOT on it
+DONE_OK = "👍"
+DONE_FAIL = "👎"
+MAX_SUMMARY_WORDS = 15
+MAX_SUMMARY_CHARS = 120
 VOICE_ACK = "🎤 מתמלל... ⏳"
 OMER_DM = os.environ.get("KAI_TELEGRAM_CHAT_ID", "")
 
@@ -226,19 +240,74 @@ def ack_classify(bot, attrs, content):
     return ("ack", TEXT_ACK)
 
 
-def auto_ack(bot, prompt, dry_run=False, sender=None):
+def own_topic(bot):
+    topics = kai_bots.bot(bot).get("topics") or []
+    return str(topics[0]) if topics else None
+
+
+def is_general(bot, attrs):
+    """A message in the group's General topic (no thread id) = a tag of / reply to this bot there."""
+    return (attrs.get("chat_id") == str(kai_bots.bot(bot).get("group_id"))
+            and not attrs.get("message_thread_id") and attrs.get("event_type") != "reaction")
+
+
+def react(bot, chat, msg, emoji):
+    """setMessageReaction with this bot's token; a new call replaces this bot's previous reaction."""
+    payload = {"chat_id": chat, "message_id": int(msg), "reaction": [{"type": "emoji", "emoji": emoji}]}
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{token(bot)}/setMessageReaction",
+        data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        data = json.loads(r.read().decode("utf-8"))
+    if not data.get("ok"):
+        raise RuntimeError(str(data)[:200])
+    return True
+
+
+def topic_link(group_id, thread, msg):
+    g = str(group_id)
+    internal = g[4:] if g.startswith("-100") else g.lstrip("-")
+    return f"https://t.me/c/{internal}/{thread}/{msg}"
+
+
+def general_done(bot, chat, tag_msg, summary, ok=True, detail_msg=None, sender=None, reactor=None):
+    """End of a General task: 👍 / 👎 on the tag message + ONE short line in General (reply to the tag).
+    Omer 06/11: "הודעת הסיכום צריכה להיות ממש קצרה" - a long or multi-line summary is refused here."""
+    sender, reactor = sender or send, reactor or react
+    s = (summary or "").strip().lstrip("‏").strip()
+    if not s or "\n" in s or len(s.split()) > MAX_SUMMARY_WORDS or len(s) > MAX_SUMMARY_CHARS:
+        raise ValueError(f"summary must be ONE line, <= {MAX_SUMMARY_WORDS} words / {MAX_SUMMARY_CHARS} chars"
+                         " (the details go in the topic)")
+    try:
+        reactor(bot, chat, tag_msg, DONE_OK if ok else DONE_FAIL)
+    except Exception:
+        pass
+    text = "‏" + s
+    if detail_msg:
+        text += "\n‏" + topic_link(kai_bots.bot(bot).get("group_id"), own_topic(bot), detail_msg)
+    return sender(bot, chat, text, thread=None, reply_to=tag_msg)
+
+
+def auto_ack(bot, prompt, dry_run=False, sender=None, reactor=None):
     import auto_ack as main_ack
-    sender = sender or send
+    sender, reactor = sender or send, reactor or react
     reg = os.path.join(kai_bots.bot(bot)["home"], "tmp", "auto_ack")
     lines = []
     for attrs, content in main_ack.parse_channels(prompt):
         mid = attrs.get("message_id", "?")
         kind, val = ack_classify(bot, attrs, content)
+        gen = mid != "?" and is_general(bot, attrs)
+        tag = f" GENERAL_TAG=1 TAG_MSG_ID={mid} WORK_THREAD_ID={own_topic(bot)}" if gen else ""
+        if gen and not dry_run:
+            try:
+                reactor(bot, attrs.get("chat_id"), mid, SEEN)
+            except Exception:
+                pass
         if kind == "none":
-            lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=NONE reason={val}")
+            lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=NONE reason={val}{tag}")
             continue
         if dry_run:
-            lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=DRYRUN text={val}")
+            lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=DRYRUN text={val}{tag}")
             continue
         os.makedirs(reg, exist_ok=True)
         key = os.path.join(reg, main_ack.registry_key(attrs) + ".ack")
@@ -250,21 +319,25 @@ def auto_ack(bot, prompt, dry_run=False, sender=None):
                 prev = open(key, encoding="utf-8").read().strip()
             except Exception:
                 prev = ""
-            lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID={prev or 'FAILED'} (already sent)")
+            lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID={prev or 'FAILED'} (already sent){tag}")
             continue
         try:
-            ack = sender(bot, attrs.get("chat_id"), val, thread=attrs.get("message_thread_id"),
-                         reply_to=mid, silent=True, timeout=3)
+            if gen:  # the work happens in the bot's own topic, never in General
+                ack = sender(bot, attrs.get("chat_id"), val, thread=own_topic(bot),
+                             reply_to=None, silent=True, timeout=3)
+            else:
+                ack = sender(bot, attrs.get("chat_id"), val, thread=attrs.get("message_thread_id"),
+                             reply_to=mid, silent=True, timeout=3)
             with open(key, "w", encoding="utf-8") as f:
                 f.write(str(ack))
             _typing("attach_ack", bot, mid, ack)
-            lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID={ack}")
+            lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID={ack}{tag}")
         except Exception as e:
             try:
                 os.remove(key)
             except Exception:
                 pass
-            lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=FAILED ({type(e).__name__})")
+            lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=FAILED ({type(e).__name__}){tag}")
     return lines
 
 
@@ -306,7 +379,9 @@ def main(argv):
             print("<system-reminder>\n" + "\n".join(lines) +
                   "\n(bot auto-ACK hook: the ACK is already in the topic. Use AUTO_ACK_MSG_ID as ACK_MSG_ID"
                   " (edit it, delete it at the end with bot_tg.py delete); do NOT send another ACK."
-                  " NONE = no ACK was sent; FAILED = send it yourself as before)\n</system-reminder>")
+                  " NONE = no ACK was sent; FAILED = send it yourself as before."
+                  " GENERAL_TAG=1 = a tag in General: 👀 is already on it and the ACK is in your topic"
+                  " WORK_THREAD_ID; work and reply ONLY there, finish with bot_tg.py general-done)\n</system-reminder>")
         return 0
     if cmd == "send":
         print(send(bot, _arg(argv, "--chat"), _arg(argv, "--text"), _arg(argv, "--thread"),
@@ -319,6 +394,21 @@ def main(argv):
     if cmd == "context":
         print(context(bot, int(_arg(argv, "--n", 20))))
         return 0
+    if cmd == "react":
+        try:
+            react(bot, _arg(argv, "--chat"), _arg(argv, "--msg"), _arg(argv, "--emoji", SEEN))
+            print("ok")
+        except Exception as e:
+            print(f"[bot_tg] react failed: {e}")
+        return 0
+    if cmd == "general-done":
+        try:
+            print(general_done(bot, _arg(argv, "--chat"), _arg(argv, "--tag-msg"), _arg(argv, "--summary"),
+                               ok="--fail" not in argv, detail_msg=_arg(argv, "--detail-msg")))
+            return 0
+        except ValueError as e:
+            print(f"[bot_tg] {e}")
+            return 2
     if cmd in ("delete", "pin", "unpin"):
         chat, msg = _arg(argv, "--chat"), _arg(argv, "--msg")
         method = {"delete": "deleteMessage", "pin": "pinChatMessage", "unpin": "unpinChatMessage"}[cmd]

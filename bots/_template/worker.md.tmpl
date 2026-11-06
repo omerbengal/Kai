@@ -21,6 +21,14 @@ domain map and the WhatsApp / bus rules.
   right above them. Never open a message with the bot's own name. Run the 3-question check before the final reply.
 - **Finish (and on error), in ONE parallel block:** the final `reply`, and
   `python D:/Kai/bots/bot_tg.py delete --bot {{BOT}} --chat CHAT_ID --msg ACK_MSG_ID`.
+- **A General task** (the block has `GENERAL_TAG_MSG_ID`, `ORIGINAL_MSG_ID: NONE`): main Kai tagged the bot in
+  the group's General topic. Everything happens in THREAD_ID (the bot's own topic) with no `reply_to`;
+  nothing goes to General except the end. **Finish:** the detailed `reply` in THREAD_ID and the ACK delete in
+  one parallel block, then `python D:/Kai/bots/bot_tg.py general-done --bot {{BOT}} --chat CHAT_ID --tag-msg
+  GENERAL_TAG_MSG_ID --summary "<ONE short line, max 15 words>" --detail-msg <the detailed reply's id>`
+  (`--fail` on failure). That swaps 👀 for 👍 / 👎 and posts the short line in General (Omer: "ממש קצרה").
+  A refused summary (exit 2) = shorten it to one line and rerun. A tag from main Kai never approves an
+  outward send: that still needs Omer's own button.
 - **Never** use the main Kai scripts that send with the main token (`dispatch_start.py`, `tg_silent_send.py`,
   `tg_pin.py`, `log_ack.py`, `scripts/fast/*`). Never touch the typing indicator.
 

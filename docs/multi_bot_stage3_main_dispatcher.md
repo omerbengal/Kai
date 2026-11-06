@@ -1,9 +1,23 @@
-# Multi-bot stage 3 - main Kai as the one dispatcher in the group (05/11/2026, DESIGN ONLY, not built)
+# Multi-bot stage 3 - main Kai as the one dispatcher in the group (05/11/2026; revised + BUILT 06/11/2026, live test pending)
 
 > **Revised 06/11/2026 (Omer msgs 22573, 22581).** Two changes: (a) Telegram DOES support bot-to-bot messages
 > since Bot API 10.0 (08/05/2026), so the 05/11 claim "a bot never sees another bot's message" was outdated and
 > the local inbox (`kaiInbox` patch, bus kind `task`) is dropped; (b) the handoff is a TAG in General plus
 > reactions, not a 📋 post in the topic. Sections 0, 1, 2 and 6 below are the revised version; 3-5 still apply.
+> **06/11 later (Omer msgs 22589, 22595):** done reaction = 👍 (Omer: "עם 👍🏻"; reactions take no skin tone).
+> Omer turned Bot-to-Bot mode ON for the 3 bots and made main Kai a group admin (msg 22592). Main Kai's own bot
+> does NOT need the mode: main reads what the bots did from each bot's own `bot.db`
+> (`general_handoff.py history`), never as Telegram prompts (no extra turns, no loop) - Omer approved
+> (botmsgs_history_yes).
+>
+> **Built 06/11:** `bots/bot_tg.py` (is_general, 👀 in the auto-ACK hook, ACK in the own topic, `react`,
+> `general-done` with the one-line limit), `bots/bot_typing.py` (General tag types in the own topic),
+> `scripts/general_handoff.py` (`routes` / `tag` with the down-check / `history`), `config/bots.json` `route`
+> lines, bots' access.json + `setup_bot.py` allowFrom += <REDACTED_SECRET>, main access.json General entry,
+> `bots/_template` CLAUDE.md + worker sections (regenerated for the 3 bots), `agents/listener.md` Step G,
+> `.claude/agents/kai-worker.md` General-task line. Tests: `tests/test_bot_general_task.py`.
+> Live: the hooks, listener.md and both access.json files act now; the bots' new CLAUDE.md / worker.md load at
+> their next restart. main's kaiTopics patch is already loaded (main restarted 05:00 06/11), so no main restart.
 
 Omer (voice, msg 22485): "אני רוצה לדבר רק עם דיספאצ'ר אחד, שזה אתה". In the group "<bots group>"
 (`<group-id>`):
@@ -21,7 +35,7 @@ Read first: `docs/multi_bot_separation_design.md` (s.3 bus, s.4 main after the s
 | ~~Telegram never delivers a bot's message to another bot~~ WRONG since Bot API 10.0 (08/05/2026, checked 06/11 in core.telegram.org/bots/api-changelog + /bots/features): BotFather setting "Bot-to-Bot Communication Mode". In a group a bot gets another bot's message that mentions it or replies to it if at least ONE of the two has the mode on; with the mode on + privacy off (or admin) it gets every bot message. Off by default; `getMe` does not show it. Telegram asks for loop protection (rate / depth limits) | main Kai's message in General that tags `@<bot>` wakes that bot directly through its normal plugin. No local channel needed. |
 | The 3 domain bots: privacy OFF (`getMe` can_read_all_group_messages=true, 06/11); main bot: privacy ON | the bots already see bot messages once the mode is on; main needs admin (s.3) to see Omer in General |
 | Bots' plugin gate (kaiTopics, server.ts): a General message is delivered when it MENTIONS the bot even though `topics` lists only its thread; but group `allowFrom` is `["${KAI_TELEGRAM_CHAT_ID}"]` only | add main's bot id `<REDACTED_SECRET>` to each bot's group `allowFrom`; no gate code change for the tag itself |
-| `setMessageReaction`: a bot can react to any message in the chat (also another bot's), a new call replaces the bot's reaction, no paid reactions. ReactionTypeEmoji is a fixed list of 73: 👀 IS in it, ✅ is NOT | "done" reaction = 👌 (alternatives 💯 / 🏆 / 👍), not ✅ |
+| `setMessageReaction`: a bot can react to any message in the chat (also another bot's), a new call replaces the bot's reaction, no paid reactions. ReactionTypeEmoji is a fixed list of 73: 👀 IS in it, ✅ is NOT | "done" reaction = 👍 (Omer 22589), failure 👎; not ✅ |
 | Bot sessions are woken only by their Telegram plugin's channel notifications | the tag is a real channel notification, so this is covered |
 | main access.json: `groups: {}` | main Kai drops every group message today |
 | main bot privacy mode ON (stage 1) | in a group it would see only commands / mentions / replies to it |
@@ -48,13 +62,13 @@ Flow:
 2. Main Kai (dispatcher) decides it belongs to a domain bot and posts in General, as a reply to Omer's message,
    `@<bot username> <Omer's request, verbatim or lightly cleaned>`. No "העברתי ל..." text: the tag IS the handoff.
 3. The bot's plugin delivers it (mention in General + sender `<REDACTED_SECRET>` in allowFrom). The bot immediately sets
-   👀 on the tag message (`setMessageReaction`, the plugin's `react` tool).
+   👀 on the tag message (`setMessageReaction`; the auto-ACK hook does it in code).
 4. All the work happens in the bot's OWN topic: auto-ACK, progress edits, questions with buttons, typing. The
    first message there links to the tag message.
-5. Done: the bot (a) replaces 👀 with 👌 on the tag message, (b) posts a detailed summary in its topic, (c) posts a
+5. Done: the bot (a) replaces 👀 with 👍 on the tag message, (b) posts a detailed summary in its topic, (c) posts a
    VERY short summary in General as a reply to the tag message (one line, at most ~15 words, plus a t.me link
    to the detailed one). Omer: "הודעת הסיכום צריכה להיות ממש קצרה".
-6. Failure: the bot sets 👎 (or 😢) instead of 👌 and the one-line General summary says what failed.
+6. Failure: the bot sets 👎 instead of 👍 and the one-line General summary says what failed.
 
 What needs code (not built):
 - Each bot's group `allowFrom` gets main's id `<REDACTED_SECRET>` (access.json, after Omer's button).
@@ -62,7 +76,7 @@ What needs code (not built):
   the ACK in General. When the incoming message is in General (no thread) from `<REDACTED_SECRET>`, the ACK, typing and
   all replies go to the bot's topic (`message_thread_id` = its topic, no reply_to), and only the final one-line
   summary goes to General. The bot's CLAUDE.md gets one line: a tag from main Kai in General is Omer's request
-  relayed - act on it as his, inside the bot's normal rules, with the 👀 / 👌 / short-summary protocol.
+  relayed - act on it as his, inside the bot's normal rules, with the 👀 / 👍 / short-summary protocol.
 - Main side: the dispatcher's General route = one reply with the tag (no worker needed for the handoff itself).
 
 Safety:
@@ -146,7 +160,7 @@ needs it to be used.
    admin of the group (one tap). Live check from the shell: main token posts `@<bot> בדיקה` in General, the bot's
    plugin log shows the delivery.
 2. Bot side "General task" mode: each bot's group `allowFrom` + `<REDACTED_SECRET>`; bots' auto_ack / typing route to the
-   own topic for a General tag from main; 👀 on receipt, 👌 (or 👎) + one-line General summary + detailed topic
+   own topic for a General tag from main; 👀 on receipt, 👍 (or 👎) + one-line General summary + detailed topic
    summary at the end; CLAUDE.md line in `bots/_template` + the 3 bots; tests (fake update in General from main,
    fake update from another bot = dropped). Restart each bot only when idle (principles.md s.4).
 3. Main access.json gets the General entry (s.3).

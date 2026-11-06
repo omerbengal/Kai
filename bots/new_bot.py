@@ -148,7 +148,7 @@ def render(name, config_path=kai_bots.CONFIG):
     others = ", ".join(f"{c.get('title', n)}" for n, c in allb.items() if n != name) or "none yet"
     wa_text = WA_FOR_WA_BOT if "whatsapp" in caps else WA_FOR_DOMAIN_BOT
     values = {"BOT": name, "TITLE": cfg.get("title", name), "TOPIC_LABEL": cfg.get("topic_name", name),
-              "OTHER_BOTS": others}
+              "OTHER_BOTS": others, "USERNAME": cfg.get("username", name)}
     values["DOMAIN"] = fill(domain, values)
     values["WHATSAPP"] = fill(wa_text, values)
     values["CONTACTS"] = CONTACTS_OWNER if "contacts_owner" in caps else CONTACTS_READONLY

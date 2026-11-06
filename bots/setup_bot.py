@@ -29,6 +29,7 @@ except Exception:
 import kai_bots  # noqa: E402
 
 OMER_ID = os.environ.get("KAI_TELEGRAM_CHAT_ID", "")
+MAIN_BOT_ID = "<REDACTED_SECRET>"  # main Kai's bot: its tag in General is a stage-3 handoff (06/11/2026)
 MAIN_TOKEN_PREFIX = "<REDACTED_SECRET>:"
 MEMORY_ROOT = "C:/Users/Omer/.claude/projects"
 
@@ -114,7 +115,8 @@ def main(argv):
     access = {
         "dmPolicy": "allowlist",
         "allowFrom": [OMER_ID],
-        "groups": {group_id: {"requireMention": False, "allowFrom": [OMER_ID], "topics": [thread_id]}},
+        "groups": {group_id: {"requireMention": False, "allowFrom": [OMER_ID, MAIN_BOT_ID],  # main: General tags
+                              "topics": [thread_id]}},
         "pending": {},
         "ackReaction": "",
     }

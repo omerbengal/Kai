@@ -10,6 +10,42 @@ The `ORIGINAL_MSG_ID` is the `message_id` from the incoming `<channel>` tag. Eve
 
 ---
 
+## Step G — The General topic of the bots group (stage 3, 06/11/2026, Omer msgs 22485 / 22581 / 22589)
+
+A `<channel>` with `chat_id="<group-id>"` (group "<bots group>") and no `message_thread_id` is Omer writing in
+the group's **General** topic. Main Kai is the ONE dispatcher there (`docs/multi_bot_stage3_main_dispatcher.md`).
+Only Omer's General messages reach main (access.json `topics: ["general"]`, `allowFrom` = Omer); the bots'
+topics and the bots' own lines never do. In General there is **no auto-ACK** (`auto_ack.py` is private-only),
+so this section replaces Step −2 / Step shortening for these messages:
+
+1. **Domain request → tag the bot.** `python D:/Kai/scripts/general_handoff.py routes` prints the bots and
+   their domains (each bot's domain line). If it belongs to one of them, ONE call and stop:
+   `python D:/Kai/scripts/general_handoff.py tag --bot <name> --reply-to <message_id> --text "<the request>"`.
+   The text is Omer's request written as a clear instruction (his words, lightly cleaned, plus any context
+   from his message the bot needs) - no "העברתי ל...", no own name. It prints `TAGGED <id>` (the bot now
+   puts 👀, works in its topic, and ends with 👍 + one short line in General) or `DOWN <id>` (the bot is
+   not running; the script already told Omer). Nothing else to send. Anything WhatsApp = the `whatsapp` bot.
+2. **Unsure which bot** → ONE question in General (`reply` with `chat_id=<group-id>`, `reply_to`, no
+   `message_thread_id`) with a button per bot, `callback_data="gen_route:<bot>:<message_id>"`. On the
+   callback: the `tag` call with `--reply-to <message_id>` and the original text from history, then edit the
+   question message to `‏✅ הועבר`.
+3. **Personal / general** (not a bot's domain): Options A/B/C/C2 answer inline in General (`reply` with the
+   group chat_id, `reply_to`, no thread). Anything bigger → the worker path with the ACK IN General:
+   `dispatch_start.py --chat_id <group-id> --reply_to <message_id> --title "<summary>"` (**no `--pin`**:
+   tg_pin is private-only), then the worker with `NOTES: CHAT_ID=<group-id> (General topic): every
+   reply / edit_message uses this chat_id and no message_thread_id; skip tg_pin and log_ack; delete the ACK
+   with deleteMessage on this chat_id and do NOT delete its messages row (group ids collide with private
+   ones)`. **No fast script (Option D) from General**: they answer in the private chat only; the worker does
+   the DB operation itself. Reminders still fire in the private chat; say so when setting one.
+4. **"מה הבוט עשה?" / anything about a bot's work** (in General OR the private chat): read it, never guess -
+   `python D:/Kai/scripts/general_handoff.py history --bot <name> [--n 40]` prints the bot's recent
+   messages from its own `bot.db` (every reply, question and summary it sent, and what Omer wrote it).
+   Main Kai never receives the bots' Telegram messages as prompts (no loop, no extra turns; Omer msg 22595).
+5. **Never** tag a bot for a message that came from a bot, never answer in a bot's topic, never post
+   "העברתי ל..." lines. The private chat keeps working exactly as before.
+
+---
+
 ## Step shortening (Omer's request, 11/10/2026) — fewer turns, same work
 
 Every tool call is a full model turn (~6 seconds measured), so the wait is turns x 6s. Three rules cut turns without touching quality:

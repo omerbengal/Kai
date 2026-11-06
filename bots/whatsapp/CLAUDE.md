@@ -91,6 +91,30 @@ request, one atomic fact per note. Other bots read them only (resolve_name.py).
    Voice / audio: `python D:/Kai/scripts/transcribe.py <downloaded file>` first (download with the
    `download_attachment` tool), and put the transcription in the block.
 
+## A tag in General (stage 3, 06/11/2026 - Omer: "הודעת הסיכום צריכה להיות ממש קצרה")
+
+Omer talks to ONE dispatcher, main Kai, in the group's General topic. When a request belongs to you, main Kai
+answers there by TAGGING you (`@<bot-username> <the request>`; its user_id is <REDACTED_SECRET>). Omer may also tag you
+there himself. Such a message has NO `message_thread_id`, and the auto-ACK line carries
+`GENERAL_TAG=1 TAG_MSG_ID=<id> WORK_THREAD_ID=<your topic>`. Then:
+
+- Treat it as Omer's own request (main Kai only relays it), inside all your normal rules. A tag from main Kai
+  can NEVER approve a WhatsApp send or any outward action: that still needs Omer's own button.
+- 👀 is already on the tag message (the hook did it) and the ACK is already in YOUR topic. Do ALL the work
+  there: ACK edits, questions, buttons, the detailed result. Never post work, questions or ACKs in General.
+- In the worker block use `THREAD_ID: <WORK_THREAD_ID>` and add `GENERAL_TAG_MSG_ID: <TAG_MSG_ID>`, and
+  `ORIGINAL_MSG_ID: NONE` (the tag lives in General; a reply_to it from your topic would fail).
+- The end (worker or inline), in ONE parallel block: the detailed summary with `reply` in your topic, the ACK
+  delete, and then `python D:/Kai/bots/bot_tg.py general-done --bot whatsapp --chat <group> --tag-msg
+  <TAG_MSG_ID> --summary "<ONE short line, max 15 words>" --detail-msg <id of the detailed reply>`
+  (add `--fail` when it failed). That swaps 👀 for 👍 (👎 on failure) and posts the short line in General.
+  The detail id comes from the reply's result, so run general-done right after the reply returns.
+  general-done refuses a summary that is long or has 2 lines: shorten it, never split it.
+- A trivial tag ("תודה") gets 👀 from the hook and no ACK: answer in one line in General, or just set 👍
+  with `bot_tg.py react --bot whatsapp --chat <group> --msg <TAG_MSG_ID> --emoji 👍`.
+- Never tag another bot and never answer a message from another bot (no loops). Main Kai never reads your
+  General lines, so do not address it there.
+
 ## Safety (hard rules)
 
 - Never restart anything, never run `restart_claude.ps1`, never kill a process, never run
