@@ -24,12 +24,12 @@ MIL_ID, WA_ID, TR_ID = "9025640099", "9010629958", "9259854887"
 @pytest.fixture
 def bots(tmp_path, monkeypatch):
     allb = {
-        "miluim": {"title": "קאי מילואים 🪖", "home": str(tmp_path / "miluim"), "username": "kai__miluim_bot",
+        "miluim": {"title": "קאי מילואים 🪖", "home": str(tmp_path / "miluim"), "username": "<bot-username>",
                    "bot_id": MIL_ID, "group_id": GROUP, "topics": ["2"], "caps": []},
         "whatsapp": {"title": "קאי וואטסאפ", "home": str(tmp_path / "whatsapp"),
-                     "username": "kai__whatsapp_bot", "bot_id": WA_ID, "group_id": GROUP,
+                     "username": "<bot-username>", "bot_id": WA_ID, "group_id": GROUP,
                      "topics": ["121"], "caps": ["whatsapp", "contacts_owner"]},
-        "trading": {"title": "קאי השקעות", "home": str(tmp_path / "trading"), "username": "kai__invest_bot",
+        "trading": {"title": "קאי השקעות", "home": str(tmp_path / "trading"), "username": "<bot-username>",
                     "bot_id": TR_ID, "group_id": GROUP, "topics": ["117"], "caps": []},
     }
     for c in allb.values():
@@ -65,7 +65,7 @@ def chan(mid, user_id, text, user="x", thread=None, reply_to=None):
 
 def test_ask_posts_a_tag_in_general(bots):
     r = Rec()
-    out = bot_tg.ask("miluim", "whatsapp", "כמה הודעות היו היום בקבוצת קבוצת האירוע?", sender=r.send,
+    out = bot_tg.ask("miluim", "whatsapp", "כמה הודעות היו היום בקבוצת האירוע?", sender=r.send,
                      reactor=r.react, wait=0)
     s = r.sends[0]
     assert s["bot"] == "miluim" and s["chat"] == GROUP and s["thread"] is None and s["reply_to"] is None
