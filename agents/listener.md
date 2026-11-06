@@ -870,7 +870,7 @@ Rules:
 - Send ACK: `"🔄 מיישם שינויים — תחקור #NNN..."` (capture ACK_MSG_ID)
 - Read `D:/Kai/investigations/NNN.md`
 - Parse the "פתרון מוצע" section — make each file edit directly (Edit tool or Bash)
-- Public repo sync: `python D:/Kai-public-tools/public_sync.py --message "Investigation NNN: <one-line English fix summary>"` and add its one-line result to the reply (format in `.claude/agents/kai-worker.md` → Public repo sync)
+- Public repo sync: `python D:/Kai-public-tools/public_sync.py --message "Investigation NNN: <one-line English fix summary>"` and add its one-line result to the reply (format in `.claude/agents/kai-worker.md` → Public repo sync; `SYNC_BLOCKED` = resolve the hits and rerun, never stop there)
 - In one parallel response: send `"✅ שינויים יושמו — תחקור #NNN"` (+ the sync line) with `reply_to=ORIGINAL_MSG_ID` + delete ACK
 
 **When `callback_data` starts with `edit_investigation_`:**

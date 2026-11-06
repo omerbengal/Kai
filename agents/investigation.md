@@ -155,7 +155,7 @@ The dispatcher receives `[callback: ✅] על: "[investigation summary]"` with `
 1. Read `D:/Kai/investigations/NNN.md` to get the proposed changes
 2. Send ACK: "🔄 מיישם שינויים..."
 3. Make each file edit directly (Edit tool or Bash)
-3b. Public repo sync: `python D:/Kai-public-tools/public_sync.py --message "Investigation NNN: <fix summary>"` (see `agents/worker.md` → Public repo sync)
+3b. Public repo sync: `python D:/Kai-public-tools/public_sync.py --message "Investigation NNN: <fix summary>"` (see `.claude/agents/kai-worker.md` → Public repo sync; on `SYNC_BLOCKED` resolve the hits and rerun until it commits, never stop at "blocked")
 4. Send confirmation: "✅ שינויים יושמו — תחקור #NNN" + the one-line sync result
 5. Delete ACK
 
