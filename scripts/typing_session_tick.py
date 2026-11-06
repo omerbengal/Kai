@@ -47,7 +47,7 @@ def main():
     # or a background agent working after the turn ended) this is a no-op.
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from typing_lease import renew
-    renew()
+    renew(data.get("tool_name"), data.get("tool_input"))
 
 
 if __name__ == "__main__":

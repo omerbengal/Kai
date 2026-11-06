@@ -2,9 +2,11 @@
 """
 Night mode - the single source of truth for Kai's nightly downtime.
 
-Kai and the WhatsApp bridge are shut down at 02:00 and started again at 05:00
+Kai (and the domain bots) are shut down at 02:00 and started again at 05:00
 LOCAL time, so they spend the night fresh rather than accumulating memory
 (investigation: claude.exe reached 512MB after 18 minutes of uptime).
+The WhatsApp bridge is NOT part of the night since 06/11/2026 (it has no context
+to clear, and its watchdog no longer stands down).
 
 "Local" means scripts/local_tz.py: Israel at home, the destination while travel
 mode is on (2026-09-13). The scheduled tasks can no longer carry the clock time,
@@ -14,7 +16,7 @@ because it moves with Omer, so:
   scripts/kai_night.ps1, which asks this module (--slot) whether now is the
   local 02:00 / 05:00 slot. Only then does it act, and only once per night.
 
-  scripts/kai_watchdog.py / whatsapp_bridge_watchdog.py call should_stand_down(),
+  scripts/kai_watchdog.py calls should_stand_down(),
   which uses the same local clock for the quiet window.
 
 THE OFF SWITCH

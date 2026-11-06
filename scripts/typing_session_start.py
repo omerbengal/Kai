@@ -77,7 +77,15 @@ def main():
     # (investigation #043).
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from typing_lease import open_lease
-    open_lease(chat_id)
+    ack_key = None
+    try:
+        import auto_ack
+        chans = auto_ack.parse_channels(prompt)
+        if chans:
+            ack_key = auto_ack.registry_key(chans[0][0])
+    except Exception:
+        pass
+    open_lease(chat_id, msg_id=attr("message_id"), ack_key=ack_key)
     _tlog("LEASE-OPEN", "chat_id=" + chat_id + " msg=" + str(attr("message_id")))
 
 

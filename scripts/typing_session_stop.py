@@ -31,17 +31,26 @@ FLAG_FILE = "D:/Kai/tmp/typing_resume_armed.json"
 
 def main():
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from typing_lease import pause, close
+    from typing_lease import pause, end_turn
+    reply_to = None
+    if "--end-turn" not in sys.argv:
+        try:
+            import json
+            data = json.loads(sys.stdin.read() or "{}")
+            ti = data.get("tool_input") or {}
+            reply_to = ti.get("reply_to") or ti.get("message_id")
+        except Exception:
+            reply_to = None
     if "--end-turn" in sys.argv:
-        close()          # Stop hook: turn over, drop the lease entirely
-        _tlog("LEASE-CLOSE")
+        kept = end_turn()  # Stop hook: drop the inline tasks; a worker's tasks keep the lease
+        _tlog("LEASE-CLOSE" if not kept else "TURN-END", f"worker tasks kept={kept}")
     elif "--react" in sys.argv:
         # PreToolUse(react): a reaction does not clear client-side typing, so
         # also wait until the ~5s typing status has expired (<= TYPING_VISIBLE).
-        pause(wait_expire=True)
+        pause(wait_expire=True, reply_to=reply_to)
         _tlog("LEASE-PAUSE", "react (waited for typing to expire)")
     else:
-        pause()          # PreToolUse(reply): typing off now, turn stays open
+        pause(reply_to=reply_to)  # PreToolUse(reply): typing off now, turn stays open
         _tlog("LEASE-PAUSE")
 
 

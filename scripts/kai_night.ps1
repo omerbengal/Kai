@@ -1,7 +1,12 @@
 # kai_night.ps1 - the two halves of Kai's nightly downtime.
 #
-#   -Action Shutdown   runs at 02:00 (task KaiNightShutdown): stops Claude and the bridge
-#   -Action Start      runs at 05:00 (task KaiMorningStart):  starts the bridge and Claude
+#   -Action Shutdown   runs at 02:00 (task KaiNightShutdown): stops the domain bots and Claude
+#   -Action Start      runs at 05:00 (task KaiMorningStart):  starts Claude and the bots
+#
+# The WhatsApp bridge is NOT part of the night (Omer, 06/11/2026): the stop exists to clear
+# Claude's context and the bridge has none. It never really stopped anyway - it runs elevated
+# (KaiWhatsAppBridge, HighestAvailable) and Stop-Process from this LeastPrivilege task failed
+# silently while the log said "stopped". KaiWhatsAppWatchdog guards it around the clock.
 #
 # Both halves refuse to do anything unless D:\Kai\tmp\night_mode_enabled exists.
 # Deleting that one file is the off switch: the tasks still fire, see the flag is
@@ -37,7 +42,6 @@ $ErrorActionPreference = 'Continue'
 
 $FlagFile = 'D:\Kai\tmp\night_mode_enabled'
 $LogFile = 'D:\Kai\tmp\night_mode.log'
-$BridgeBat = 'D:\Kai\start_whatsapp_bridge.bat'
 $Python = 'C:\Users\Omer\AppData\Local\Programs\Python\Python39\python.exe'
 
 function Write-Log([string]$msg) {
@@ -66,43 +70,6 @@ c.close()
     } finally {
         Remove-Item $tmp -Force -ErrorAction SilentlyContinue
     }
-}
-
-function Get-BridgeChain {
-    # Walks up from whatever is listening on 8080: main.exe <- go.exe <- cmd.exe.
-    # Identifying the bridge by its port rather than by name matters because
-    # 'main.exe' and 'go.exe' are generic names and their CommandLine is not
-    # readable without elevation, so there is nothing else to match on safely.
-    $chain = @()
-    $pidListen = Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue |
-                 Select-Object -First 1 -ExpandProperty OwningProcess
-    if (-not $pidListen) { return $chain }
-
-    $cur = $pidListen
-    for ($i = 0; $i -lt 4 -and $cur; $i++) {
-        $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$cur" -ErrorAction SilentlyContinue
-        if (-not $proc) { break }
-        # Stop climbing past the cmd.exe that the .bat runs in. Anything above it
-        # belongs to Task Scheduler or a terminal we must not kill.
-        if ($proc.Name -notin @('main.exe', 'go.exe', 'cmd.exe')) { break }
-        $chain += [pscustomobject]@{ Name = $proc.Name; Id = $proc.ProcessId }
-        if ($proc.Name -eq 'cmd.exe') { break }
-        $cur = $proc.ParentProcessId
-    }
-    return $chain
-}
-
-function Stop-Bridge {
-    $chain = Get-BridgeChain
-    if (-not $chain) {
-        Write-Log "bridge: nothing listening on 8080, already down"
-        return 0
-    }
-    foreach ($p in $chain) {
-        Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-        Write-Log ("bridge: stopped {0} (pid {1})" -f $p.Name, $p.Id)
-    }
-    return $chain.Count
 }
 
 function Stop-Claude {
@@ -161,27 +128,6 @@ function Stop-Claude {
     return $claudePIDs.Count
 }
 
-function Start-Bridge {
-    # Clear any leftover first. start_whatsapp_bridge.bat only ever starts a new
-    # bridge, so a survivor still holding 8080 would make the new one fail to bind.
-    Stop-Bridge | Out-Null
-    Start-Sleep -Seconds 2
-    Start-Process 'cmd.exe' -ArgumentList '/c', $BridgeBat -WindowStyle Hidden
-    Write-Log "bridge: launch issued"
-
-    # 'go run' compiles before it listens, so give it real time before judging.
-    for ($i = 0; $i -lt 60; $i++) {
-        Start-Sleep -Seconds 2
-        $up = Get-NetTCPConnection -LocalPort 8080 -State Listen -ErrorAction SilentlyContinue
-        if ($up) {
-            Write-Log ("bridge: listening on 8080 after {0}s" -f (($i + 1) * 2))
-            return $true
-        }
-    }
-    Write-Log "bridge: FAILED to listen on 8080 within 120s"
-    return $false
-}
-
 function Start-Claude {
     # Reuse the path that is already proven in production: KaiRestart runs
     # run_restart_logged.ps1 -> restart_claude.ps1, which launches a session,
@@ -204,6 +150,28 @@ function Start-Claude {
     Write-Log "claude: FAILED to appear within 120s"
     return $false
 }
+
+function Invoke-Bots([string]$verb, [switch]$Dry) {
+    # Domain bots (config\bots.json, multi-bot stage 1, 05/11/2026). Each bot is its own
+    # Claude session launched by its own task (KaiBot<Name>, clean env). stop-all kills only
+    # PIDs whose session cwd is the bot home; start-all clears the needs-auth cache trap and
+    # runs the task. Never fatal for main Kai: any failure is logged and the night goes on.
+    $botArgs = @('D:\Kai\scripts\kai_bots.py', $verb)
+    if ($Dry) { $botArgs += '--dry-run' }
+    try {
+        $out = & $Python @botArgs 2>&1
+        $rc = $LASTEXITCODE
+        foreach ($l in @($out)) { Write-Log "bots: $l" | Write-Host }
+        return ($rc -eq 0)
+    } catch {
+        Write-Log "bots: $verb threw: $_" | Write-Host
+        return $false
+    }
+}
+
+# Main Kai's start needs ~20s for its /reload-plugins workaround before a second
+# session joins; bots start after that.
+$BotStartDelaySeconds = 20
 
 # ---------------------------------------------------------------- main
 
@@ -230,30 +198,32 @@ if (-not $Force) {
 
 if ($DryRun) {
     Write-Log "dry-run: would $Action now, exiting without touching any process"
+    if ($Action -eq 'Shutdown') { Invoke-Bots 'stop-all' -Dry | Out-Null } else { Invoke-Bots 'start-all' -Dry | Out-Null }
     exit 0
 }
 
 if ($Action -eq 'Shutdown') {
     Write-Log "=== shutdown start ==="
+    # Bots first, with their whole process tree; Stop-Claude below kills every claude.exe and
+    # would otherwise leave a bot's plugin grandchild polling its token.
+    Invoke-Bots 'stop-all' | Out-Null
     $c = Stop-Claude
-    $b = Stop-Bridge
-    Write-Log "=== shutdown done (claude procs: $c, bridge procs: $b) ==="
-    Write-ActionLog 'night_shutdown' "stopped claude=$c bridge=$b"
+    Write-Log "=== shutdown done (claude procs: $c) ==="
+    Write-ActionLog 'night_shutdown' "stopped claude=$c"
     exit 0
 }
 
 Write-Log "=== start begin ==="
-# Bridge first: it takes the longest (it compiles), and a session that comes up
-# to a bridge already listening never sees a gap.
-$bridgeOk = Start-Bridge
 $claudeOk = Start-Claude
-Write-Log "=== start done (bridge ok: $bridgeOk, claude ok: $claudeOk) ==="
-Write-ActionLog 'night_start' "bridge_ok=$bridgeOk claude_ok=$claudeOk"
+Start-Sleep -Seconds $BotStartDelaySeconds
+$botsOk = Invoke-Bots 'start-all'
+Write-Log "=== start done (claude ok: $claudeOk, bots ok: $botsOk) ==="
+Write-ActionLog 'night_start' "claude_ok=$claudeOk bots_ok=$botsOk"
 
-if (-not $bridgeOk -or -not $claudeOk) {
+if (-not $claudeOk) {
     # Leave the alerting to the watchdogs, which wake at 05:10 and will report a
     # genuine failure through the normal path rather than inventing a second one.
-    Write-Log "one half did not come up; watchdogs resume at 05:10 and will handle it"
+    Write-Log "claude did not come up; the watchdog resumes at 05:10 and will handle it"
     exit 1
 }
 exit 0

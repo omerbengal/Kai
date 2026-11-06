@@ -28,7 +28,23 @@ If renewals stop for ANY reason - turn ended, background worker finished,
 agent crashed, session compacted, async race - the loop dies within
 LEASE_SECONDS. No Stop hook, no SubagentStop hook and no ordering guarantee
 is required for correctness.
+
+TASKS (fix 05/11/2026, Omer msgs 22485 / 22505). Two flaws of the single lease:
+  a. the Stop hook dropped the lease when the DISPATCHER's turn ended, i.e. right after it spawned the
+     background worker - the worker's tool calls then renewed nothing and typing died while it worked;
+  b. with two workers, worker 1's final reply paused the lease and nothing brought it back in time for
+     worker 2.
+Now the lease counts tasks: every incoming message opens one (its message id + the auto-ACK registry key).
+  - an Agent / SendMessage call hands the turn's tasks to a worker ("handed");
+  - Stop (end_turn) drops the tasks that were NOT handed (inline / fast-script answers) and removes the lease
+    only when no task is left, so a worker keeps renewing after the dispatcher's turn;
+  - a task ends when its ACK is deleted (any tool call whose input carries "deleteMessage" and the ACK id -
+    the dispatcher's inline urllib, the worker completion block), when 90s pass after a reply to it, or after
+    TASK_TTL; when the LAST task ends the lease file is removed, so no trailing call can revive typing;
+  - a reply to one task while another handed task is open sets resume_at: the loop waits RESUME_DELAY and
+    resumes typing for the other task without waiting for its next tool call.
 """
+import re
 import os, sys, json, time, subprocess
 
 LEASE_FILE = "D:/Kai/tmp/typing_lease.json"
@@ -40,6 +56,12 @@ LAST_SEND_FILE = "D:/Kai/tmp/typing_last_send.txt"  # epoch of last SUCCESSFUL s
 TYPING_VISIBLE = 5.5    # Telegram clients show "typing" ~5s after the last sendChatAction
 TYPING_LOOP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "typing_loop.py")
 LEASE_SECONDS = 15
+AGENT_HOLD = 60         # Agent / SendMessage: a background worker needs up to ~55s for its first call
+RESUME_DELAY = 3        # another task is still open after a reply: typing back after this
+TASK_TTL = 1800         # a task never closed (crashed worker) stops counting after 30 min
+REPLIED_TTL = 90        # a task that got a reply and whose ACK delete was not seen: gone after this
+ACK_REGISTRY = "D:/Kai/tmp/auto_ack"   # scripts/auto_ack.py: <key>.ack holds the ACK message id
+HANDOFF_TOOLS = ("Agent", "Task", "SendMessage")
 DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 CREATE_NO_WINDOW = 0x08000000
@@ -119,28 +141,106 @@ def _ensure_loop(lease):
     return lease
 
 
-def open_lease(chat_id):
-    """New incoming message: the ONLY thing that clears a pause."""
+def _tasks(lease, now=None):
+    """Open tasks, without the expired ones (TASK_TTL; REPLIED_TTL after a reply)."""
+    now = now or time.time()
+    out = {}
+    for k, v in (lease.get("tasks") or {}).items():
+        if now - float(v.get("opened", 0) or 0) >= TASK_TTL:
+            continue
+        r = float(v.get("replied_at", 0) or 0)
+        if r and now - r >= REPLIED_TTL:
+            continue
+        out[k] = v
+    return out
+
+
+def _ack_id(task):
+    key = task.get("ack_key")
+    if not key:
+        return None
+    try:
+        with open(os.path.join(ACK_REGISTRY, key + ".ack"), encoding="utf-8") as f:
+            v = f.read().strip()
+        return v if v.isdigit() else None
+    except Exception:
+        return None
+
+
+def _acks_deleted(tasks, tool_input):
+    """Task keys whose ACK this tool call deletes (Bot API deleteMessage with the ACK id in its input)."""
+    try:
+        text = tool_input if isinstance(tool_input, str) else json.dumps(tool_input or {})
+    except Exception:
+        return []
+    if "deleteMessage" not in text:
+        return []
+    gone = []
+    for k, t in tasks.items():
+        ack = _ack_id(t)
+        if ack and re.search(r"(?<!\d)" + ack + r"(?!\d)", text):
+            gone.append(k)
+    return gone
+
+
+def _remove_lease():
+    try:
+        os.remove(LEASE_FILE)
+    except Exception:
+        pass
+
+
+def open_lease(chat_id, msg_id=None, ack_key=None):
+    """New incoming message: the ONLY thing that opens the indicator / clears a pause. Opens a task."""
+    now = time.time()
     with _Lock():
-        lease = {"chat_id": str(chat_id), "deadline": time.time() + LEASE_SECONDS,
-                 "turn_open": True, "pid": 0, "paused_at": 0}
+        old = _read() or {}
+        tasks = _tasks(old, now)
+        if msg_id:
+            tasks[str(msg_id)] = {"opened": now, "handed": False, "ack_key": ack_key, "replied_at": 0}
+        lease = {"chat_id": str(chat_id), "deadline": now + LEASE_SECONDS,
+                 "turn_open": True, "dispatcher_turn": True, "pid": old.get("pid", 0) or 0,
+                 "paused_at": 0, "resume_at": 0, "tasks": tasks}
         lease = _ensure_loop(lease)
         _write(lease)
 
 
-def renew():
+def renew(tool_name=None, tool_input=None):
     """Extend an OPEN lease. Never creates one - a tool call alone must not be
     able to switch the indicator on. Never revives a lease paused less than
-    RESUME_GRACE seconds ago (trailing calls after the final reply)."""
+    RESUME_GRACE seconds ago (trailing calls after the final reply).
+    Also: an Agent / SendMessage call hands the open tasks to a worker; a call that deletes a task's ACK
+    ends that task, and the last task's end removes the lease."""
+    now = time.time()
     with _Lock():
         lease = _read()
         if not lease or not lease.get("turn_open"):
             return
+        tasks = _tasks(lease, now)
+        gone = _acks_deleted(tasks, tool_input) if tool_input else []
+        for k in gone:
+            tasks.pop(k, None)
+        if gone and not tasks:
+            _remove_lease()          # the last task is done: nothing may revive typing
+            return
+        hold = LEASE_SECONDS
+        if tool_name in HANDOFF_TOOLS:
+            for t in tasks.values():
+                t["handed"] = True
+            hold = AGENT_HOLD
+        lease["tasks"] = tasks
+        if not tasks and not lease.get("dispatcher_turn", True):
+            _remove_lease()          # turn over, every task expired
+            return
         paused_at = float(lease.get("paused_at", 0) or 0)
-        if paused_at and time.time() - paused_at < RESUME_GRACE:
+        if paused_at and now - paused_at < RESUME_GRACE:
+            if gone and tasks:       # another task's ACK went: let the loop resume for the rest
+                lease["resume_at"] = max(float(lease.get("resume_at", 0) or 0), now + 1)
+            _write(lease)
             return
         lease["paused_at"] = 0
-        lease["deadline"] = time.time() + LEASE_SECONDS
+        lease["resume_at"] = 0
+        lease["deadline"] = max(float(lease.get("deadline", 0) or 0), now + hold)
         lease = _ensure_loop(lease)
         _write(lease)
 
@@ -174,7 +274,7 @@ def _wait_typing_expired():
         time.sleep(min(remaining, TYPING_VISIBLE))
 
 
-def pause(wait_expire=False):
+def pause(wait_expire=False, reply_to=None):
     """Before a reply/react: stop typing NOW (synchronous PreToolUse hook).
     Returns only after any in-flight sendChatAction has completed, so the
     output is the last thing Telegram sees.
@@ -183,12 +283,21 @@ def pause(wait_expire=False):
     has visibly expired on the client. A reply does not need this - a sent
     message clears typing immediately - so replies stay fast."""
     had_lease = False
+    now = time.time()
     with _Lock():
         lease = _read()
         if lease:
             had_lease = True
             lease["deadline"] = 0
-            lease["paused_at"] = time.time()
+            lease["paused_at"] = now
+            lease["resume_at"] = 0
+            tasks = _tasks(lease, now)
+            if reply_to and str(reply_to) in tasks:
+                tasks[str(reply_to)]["replied_at"] = now
+                others = [k for k, t in tasks.items() if k != str(reply_to) and t.get("handed")]
+                if others:           # another worker is still busy: typing back after the reply
+                    lease["resume_at"] = now + RESUME_DELAY
+            lease["tasks"] = tasks
             _write(lease)
     _wait_no_inflight()
     if wait_expire and had_lease:
@@ -196,12 +305,30 @@ def pause(wait_expire=False):
 
 
 def close():
-    """Turn end. Best-effort only - lease expiry already bounds everything."""
+    """Remove the lease entirely (session start cleanup; no task survives)."""
     for path in (LEASE_FILE, "D:/Kai/tmp/typing_resume_armed.json"):
         try:
             os.remove(path)
         except Exception:
             pass
+
+
+def end_turn():
+    """Stop hook: the dispatcher's turn is over. Tasks it handed to a worker stay (the worker keeps
+    renewing); the rest were answered inline / by a fast script and end now. No task left = close().
+    Returns the number of tasks kept."""
+    with _Lock():
+        lease = _read()
+        if not lease:
+            return 0
+        tasks = {k: t for k, t in _tasks(lease).items() if t.get("handed")}
+        if tasks:
+            lease["tasks"] = tasks
+            lease["dispatcher_turn"] = False
+            _write(lease)
+            return len(tasks)
+    close()
+    return 0
 
 
 if __name__ == "__main__":
@@ -214,3 +341,5 @@ if __name__ == "__main__":
         pause(wait_expire="--react" in sys.argv)
     elif cmd == "close":
         close()
+    elif cmd == "end-turn":
+        end_turn()

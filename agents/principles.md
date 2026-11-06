@@ -50,6 +50,7 @@ Any "no" → fix before sending. If Omer corrected you twice in a row on anythin
 - Explicit "send" with clear text and recipient → send. Any ambiguity in wording, recipient or need → draft + buttons.
 - Before a retry of a send, prove the first one failed (action_log / WA DB).
 - A link Omer already has is live: destructive tests on it (cap set to 1, deadline in the past) need a heads-up first, or a separate test deployment.
+- Before restarting or killing ANY Kai bot session (manual restart, not the 02:00 night mode), check it is idle: no incoming message in its history (bot_messages / messages) in the last 10 minutes without a final reply, and no live worker of its own. A busy bot = wait, or ask Omer with the bot's current task named. An approval to restart is not an approval to cut off work in progress (05/11/2026: a domain bot was restarted 56s after Omer approved a LIVE deploy in it, and the deploy was cut mid-way).
 
 ## 5. A stated requirement is a hard filter; unknown is not a match
 עברית: דרישה שמישהו אמר היא מסננת, לא בונוס; "לא ידוע" הולך לבדיקה, לא לרשימה הנקייה.
@@ -62,6 +63,7 @@ Any "no" → fix before sending. If Omer corrected you twice in a row on anythin
 - Why: Omer reads on a phone in Hebrew; formatting mistakes read as carelessness.
 - Any yes/no or offer → inline buttons, and the ONE explicit question is the last line right above them. Never buttons under a long message with an implied question.
 - Hebrew: `‏` on every line, status emoji at the end, ← (never →; no arrows in mixed Hebrew/English), "-" never an em dash, blank line between list items, URLs surrounded by spaces, light skin tone only on hand/person emojis.
+- Never open a message with the bot's own name ("קאי וואטסאפ:", "🤖 Kai:"). Telegram already shows the sender above every message, so the name appears twice. Applies to every Kai bot, current and future (Omer, 05/11/2026: "אני לא רוצה שאף אחד יפתח הודעות בשם שלו").
 - To other people: write it the way Omer would write it to that person (contact_rules.md).
 - Text meant to be read by others gets one read-through as the reader: an effect word or rhetorical move ("פתאום", "דמיינו") appears once per post, never twice. For text a script generates repeatedly, that is a check in CODE, not a prompt wish.
 - A chart marking must look like what it means: a price range is a box from its high to its low, never a full-height time strip.

@@ -10,7 +10,8 @@ class TypingLeaseTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp()
         self._saved = (tl.LEASE_FILE, tl.INFLIGHT_FILE, tl.RESUME_GRACE, tl._ensure_loop,
-                       tl.LAST_SEND_FILE, tl.TYPING_VISIBLE)
+                       tl.LAST_SEND_FILE, tl.TYPING_VISIBLE, tl.ACK_REGISTRY)
+        tl.ACK_REGISTRY = self.dir
         tl.LAST_SEND_FILE = os.path.join(self.dir, "last_send.txt")
         tl.LEASE_FILE = os.path.join(self.dir, "lease.json")
         tl.INFLIGHT_FILE = os.path.join(self.dir, "inflight.txt")
@@ -18,7 +19,7 @@ class TypingLeaseTest(unittest.TestCase):
 
     def tearDown(self):
         (tl.LEASE_FILE, tl.INFLIGHT_FILE, tl.RESUME_GRACE, tl._ensure_loop,
-         tl.LAST_SEND_FILE, tl.TYPING_VISIBLE) = self._saved
+         tl.LAST_SEND_FILE, tl.TYPING_VISIBLE, tl.ACK_REGISTRY) = self._saved
 
     def lease(self):
         with open(tl.LEASE_FILE, encoding="utf-8") as f:
@@ -109,6 +110,118 @@ class TypingLeaseTest(unittest.TestCase):
         t0 = time.time()
         tl.pause(wait_expire=True)
         self.assertLess(time.time() - t0, 0.7)
+
+    # --- tasks (05/11/2026, Omer msgs 22485 / 22505) ---------------------------------------------
+    def _ack(self, key, ack_id):
+        tl.ACK_REGISTRY = self.dir
+        with open(os.path.join(self.dir, key + ".ack"), "w") as f:
+            f.write(str(ack_id))
+
+    def _delete_ack(self, ack_id):
+        cmd = ("python -c \"urllib.request.urlopen('https://api.telegram.org/botX/deleteMessage"
+               "?chat_id=${KAI_TELEGRAM_CHAT_ID}&message_id=%s')\"" % ack_id)
+        tl.renew("Bash", {"command": cmd})
+
+    def test_worker_keeps_typing_after_dispatcher_turn_ends(self):
+        self._ack("msg_100", 101)
+        tl.open_lease("1", msg_id="100", ack_key="msg_100")
+        tl.renew("Agent", {"prompt": "x"})            # dispatcher spawns the worker
+        self.assertEqual(tl.end_turn(), 1)             # Stop: the lease stays
+        self.assertTrue(os.path.exists(tl.LEASE_FILE))
+        tl.renew("Bash", {"command": "echo work"})     # the worker's calls keep it alive
+        self.assertGreater(self.lease()["deadline"], time.time())
+
+    def test_inline_task_ends_at_turn_end(self):
+        tl.open_lease("1", msg_id="200", ack_key="msg_200")
+        tl.pause(reply_to="200")
+        self.assertEqual(tl.end_turn(), 0)
+        self.assertFalse(os.path.exists(tl.LEASE_FILE))
+        tl.renew("Bash", {"command": "echo later"})    # a later unrelated call never revives it
+        self.assertFalse(os.path.exists(tl.LEASE_FILE))
+
+    def test_two_workers_reply1_resumes_reply2_stops_for_good(self):
+        self._ack("msg_10", 11)
+        self._ack("msg_12", 13)
+        tl.open_lease("1", msg_id="10", ack_key="msg_10")
+        tl.renew("Agent", {})
+        tl.end_turn()
+        tl.open_lease("1", msg_id="12", ack_key="msg_12")
+        tl.renew("Agent", {})
+        tl.end_turn()
+        self.assertEqual(set(self.lease()["tasks"]), {"10", "12"})
+        tl.pause(reply_to="10")                        # worker 1 final reply
+        self.assertGreater(self.lease()["resume_at"], time.time())   # typing comes back for worker 2
+        self._delete_ack(11)                           # worker 1 cleanup
+        self.assertEqual(set(self.lease()["tasks"]), {"12"})
+        self.assertTrue(self.lease()["resume_at"] > 0)
+        tl.pause(reply_to="12")                        # worker 2 final reply
+        self.assertEqual(self.lease()["resume_at"], 0)
+        self._delete_ack(13)                           # last ACK gone: the lease is removed
+        self.assertFalse(os.path.exists(tl.LEASE_FILE))
+        tl.renew("Bash", {"command": "action_log insert"})
+        self.assertFalse(os.path.exists(tl.LEASE_FILE))
+
+    def test_single_worker_final_reply_no_resume(self):
+        self._ack("msg_30", 31)
+        tl.open_lease("1", msg_id="30", ack_key="msg_30")
+        tl.renew("Agent", {})
+        tl.end_turn()
+        tl.pause(reply_to="30")
+        self.assertEqual(self.lease()["resume_at"], 0)
+        tl.renew("Bash", {"command": "unpin 31"})      # trailing call (no deleteMessage): no revive
+        self.assertEqual(self.lease()["deadline"], 0)
+        self._delete_ack(31)
+        self.assertFalse(os.path.exists(tl.LEASE_FILE))
+
+    def test_unrelated_delete_does_not_end_task(self):
+        self._ack("msg_40", 41)
+        tl.open_lease("1", msg_id="40", ack_key="msg_40")
+        tl.renew("Agent", {})
+        self._delete_ack(4100)                         # different id (prefix of digits must not match)
+        self.assertIn("40", self.lease()["tasks"])
+
+    def test_never_sticks_replied_task_without_ack_delete_expires(self):
+        tl.open_lease("1", msg_id="50")
+        tl.renew("Agent", {})
+        tl.end_turn()
+        tl.pause(reply_to="50")
+        lease = self.lease()
+        lease["tasks"]["50"]["replied_at"] = time.time() - tl.REPLIED_TTL - 1
+        lease["paused_at"] = time.time() - tl.RESUME_GRACE - 1
+        with open(tl.LEASE_FILE, "w") as f:
+            json.dump(lease, f)
+        tl.renew("Bash", {"command": "unrelated later call"})
+        self.assertFalse(os.path.exists(tl.LEASE_FILE))
+
+    def test_never_sticks_crashed_worker_ttl(self):
+        tl.open_lease("1", msg_id="60")
+        tl.renew("Agent", {})
+        tl.end_turn()
+        lease = self.lease()
+        lease["tasks"]["60"]["opened"] = time.time() - tl.TASK_TTL - 1
+        with open(tl.LEASE_FILE, "w") as f:
+            json.dump(lease, f)
+        tl.renew("Bash", {"command": "x"})
+        self.assertFalse(os.path.exists(tl.LEASE_FILE))
+
+    def test_loop_state_wait_then_send_then_exit(self):
+        import typing_loop as lp
+        lp.LEASE_FILE = tl.LEASE_FILE
+        now = time.time()
+        with open(tl.LEASE_FILE, "w") as f:
+            json.dump({"pid": 77, "deadline": 0, "resume_at": now + 5}, f)
+        self.assertEqual(lp.lease_state(77), "wait")
+        with open(tl.LEASE_FILE, "w") as f:
+            json.dump({"pid": 77, "deadline": 0, "resume_at": now - 1}, f)
+        self.assertEqual(lp.lease_state(77), "send")
+        with open(tl.LEASE_FILE, "w") as f:
+            json.dump({"pid": 77, "deadline": 0, "resume_at": now - 20}, f)
+        self.assertEqual(lp.lease_state(77), "exit")    # resume window bounded
+        with open(tl.LEASE_FILE, "w") as f:
+            json.dump({"pid": 77, "deadline": 0, "resume_at": 0, "paused_at": now}, f)
+        self.assertEqual(lp.lease_state(77), "exit")    # a plain pause ends the loop
+        os.remove(tl.LEASE_FILE)
+        self.assertEqual(lp.lease_state(77), "exit")
 
 
 if __name__ == "__main__":

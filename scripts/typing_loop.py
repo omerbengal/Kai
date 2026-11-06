@@ -89,14 +89,29 @@ def lease_claims_me(my_pid):
     return bool(lease) and int(lease.get("pid", 0)) == my_pid
 
 
-def lease_alive(my_pid):
-    """True while this loop still holds a valid, unexpired lease."""
+def lease_state(my_pid):
+    """'send' / 'wait' / 'exit'. 'wait' = paused for a reply, another task still open: resume at resume_at
+    (typing_lease.pause), then type for LEASE_SECONDS unless a tool call renews the lease."""
     lease = _read_lease()
     if lease is None:
-        return False                      # lease gone → exit
+        return "exit"                     # lease gone → exit
     if int(lease.get("pid", 0)) != my_pid:
-        return False                      # another loop took over → exit
-    return float(lease.get("deadline", 0)) > time.time()
+        return "exit"                     # another loop took over → exit
+    now = time.time()
+    if float(lease.get("deadline", 0)) > now:
+        return "send"
+    resume_at = float(lease.get("resume_at", 0) or 0)
+    if resume_at:
+        if now < resume_at:
+            return "wait"
+        if now < resume_at + 15:
+            return "send"
+    return "exit"
+
+
+def lease_alive(my_pid):
+    """True while this loop still holds a valid, unexpired lease."""
+    return lease_state(my_pid) == "send"
 
 
 def main():
@@ -167,7 +182,7 @@ def main():
         # the pid file, which this process writes itself and would keep alive
         # forever.
         if lease_mode:
-            return lease_alive(my_pid)
+            return lease_state(my_pid) != "exit"
         return pid_file_still_mine(pid_file, my_pid)
 
     def guarded_send():
@@ -184,9 +199,11 @@ def main():
         except Exception:
             pass
         try:
-            if not lease_alive(my_pid):
+            st = lease_state(my_pid)
+            if st == "exit":
                 return False
-            send_typing(chat_id)
+            if st == "send":
+                send_typing(chat_id)
             return True
         finally:
             try:
