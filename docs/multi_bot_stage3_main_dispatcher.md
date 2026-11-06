@@ -69,6 +69,12 @@ Flow:
    VERY short summary in General as a reply to the tag message (one line, at most ~15 words, plus a t.me link
    to the detailed one). Omer: "הודעת הסיכום צריכה להיות ממש קצרה".
 6. Failure: the bot sets 👎 instead of 👍 and the one-line General summary says what failed.
+7. Waiting (fix 06/11, Omer msg 22669: the miluim bot set 👍 on a proposal and only then started the work):
+   a question / proposal / approve buttons is NOT done. `bot_tg.py general-wait` sets 🤔 (no General line) and marks
+   the tag `waiting` in `<home>/tmp/general_tags.json`; general-done refuses a waiting tag. Omer's answer in the topic
+   (a callback on / reply to the question or the done detail message, else the newest waiting tag) puts 👀 back and
+   the auto-ACK line carries `GENERAL_PENDING_TAG=<id>`, so the follow-up finish closes the ORIGINAL tag.
+   Tests: `tests/test_bot_general_task.py`.
 
 What needs code (not built):
 - Each bot's group `allowFrom` gets main's id `<REDACTED_SECRET>` (access.json, after Omer's button).

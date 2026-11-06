@@ -25,6 +25,9 @@ CLI:
   bot_tg.py general-done --bot miluim --chat C --tag-msg M --summary "..." [--fail] [--detail-msg D]
                                                      end of a General task: 👍/👎 on the tag + ONE short line
                                                      in General (reply to the tag) + link to the details
+  bot_tg.py general-wait --bot miluim --chat C --tag-msg M [--question-msg Q]
+                                                     stopped to ask Omer: 🤔 on the tag, no General line; his
+                                                     answer in the topic reopens it (👀, GENERAL_PENDING_TAG)
 
 General tasks (stage 3, 06/11/2026, docs/multi_bot_stage3_main_dispatcher.md s.2): a message in the
 group's General topic (no message_thread_id) reaches a bot only when it tags the bot (main Kai's handoff,
@@ -214,6 +217,8 @@ TEXT_ACK = "🔄 ⏳"
 SEEN = "👀"       # ReactionTypeEmoji is a fixed list (checked 06/11/2026): ✅ and skin tones are NOT on it
 DONE_OK = "👍"
 DONE_FAIL = "👎"
+WAITING = "🤔"    # waiting for Omer's answer in the topic (on the fixed reaction list)
+REOPEN_HOURS = 24
 MAX_SUMMARY_WORDS = 15
 MAX_SUMMARY_CHARS = 120
 VOICE_ACK = "🎤 מתמלל... ⏳"
@@ -278,14 +283,110 @@ def general_done(bot, chat, tag_msg, summary, ok=True, detail_msg=None, sender=N
     if not s or "\n" in s or len(s.split()) > MAX_SUMMARY_WORDS or len(s) > MAX_SUMMARY_CHARS:
         raise ValueError(f"summary must be ONE line, <= {MAX_SUMMARY_WORDS} words / {MAX_SUMMARY_CHARS} chars"
                          " (the details go in the topic)")
+    if load_tags(bot).get(str(tag_msg), {}).get("state") == "waiting":
+        raise ValueError("this tag is WAITING for Omer's answer (general-wait): not done yet. Close it only"
+                         " after his answer, when the work is really over")
     try:
         reactor(bot, chat, tag_msg, DONE_OK if ok else DONE_FAIL)
+    except Exception:
+        pass
+    try:
+        _set_tag(bot, tag_msg, chat=chat, state="done", detail=str(detail_msg) if detail_msg else None)
     except Exception:
         pass
     text = "‏" + s
     if detail_msg:
         text += "\n‏" + topic_link(kai_bots.bot(bot).get("group_id"), own_topic(bot), detail_msg)
     return sender(bot, chat, text, thread=None, reply_to=tag_msg)
+
+
+# --- General tag states (06/11/2026, Omer msg 22669: 👍 showed while the real work only started) ----------
+# <home>/tmp/general_tags.json  {tag_msg: {chat, state: working|waiting|done, ts, question?, detail?,
+# close_on_ack?}}. A question = general-wait (🤔); Omer's answer in the topic reopens the tag (👀) and the
+# auto-ACK line carries GENERAL_PENDING_TAG so the follow-up finish closes the ORIGINAL tag.
+
+def _tags_path(bot):
+    return os.path.join(kai_bots.bot(bot)["home"], "tmp", "general_tags.json")
+
+
+def load_tags(bot):
+    try:
+        with open(_tags_path(bot), encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_tags(bot, tags):
+    p = _tags_path(bot)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    cutoff = datetime.now(timezone.utc).timestamp() - 7 * 86400
+    tags = {k: v for k, v in tags.items() if v.get("ts", cutoff + 1) > cutoff}
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(tags, f, ensure_ascii=False)
+    os.replace(tmp, p)
+
+
+def _set_tag(bot, tag, **fields):
+    tags = load_tags(bot)
+    t = tags.get(str(tag), {})
+    t.update(fields)
+    t["ts"] = datetime.now(timezone.utc).timestamp()
+    tags[str(tag)] = t
+    save_tags(bot, tags)
+    return t
+
+
+def general_wait(bot, chat, tag_msg, question_msg=None, reactor=None):
+    """The bot stopped to ask Omer (question / proposal / buttons): 🤔 on the tag, NO line in General."""
+    reactor = reactor or react
+    try:
+        reactor(bot, chat, tag_msg, WAITING)
+    except Exception:
+        pass
+    _set_tag(bot, tag_msg, chat=chat, state="waiting", question=str(question_msg) if question_msg else None)
+    return "waiting"
+
+
+def reopen_tag(bot, attrs, reactor=None):
+    """Omer's answer in the bot's own topic: the General tag it answers goes back to 👀 (working).
+    Match: a callback on / reply to the question or the done detail message; else the newest waiting tag."""
+    reactor = reactor or react
+    if attrs.get("chat_id") != str(kai_bots.bot(bot).get("group_id")) or not attrs.get("message_thread_id"):
+        return None
+    target = attrs.get("message_id") if "callback_data" in attrs else attrs.get("reply_to_message_id")
+    now = datetime.now(timezone.utc).timestamp()
+    tags = {k: v for k, v in load_tags(bot).items() if now - v.get("ts", 0) < REOPEN_HOURS * 3600}
+    hit = None
+    if target:
+        for k, v in tags.items():
+            if (v.get("state") == "waiting" and v.get("question") == str(target)) or \
+               (v.get("state") == "done" and v.get("detail") == str(target)):
+                hit = k
+    if hit is None:
+        waiting = sorted((v.get("ts", 0), k) for k, v in tags.items() if v.get("state") == "waiting")
+        hit = waiting[-1][1] if waiting else None
+    if hit is None:
+        return None
+    try:
+        reactor(bot, tags[hit].get("chat"), hit, SEEN)
+    except Exception:
+        pass
+    _set_tag(bot, hit, state="working")
+    return hit
+
+
+def close_on_ack_delete(bot, ack_id, reactor=None):
+    """One-off safety net: a tag marked close_on_ack=<ACK> gets 👍 when that ACK is deleted."""
+    reactor = reactor or react
+    for k, v in load_tags(bot).items():
+        if v.get("close_on_ack") == str(ack_id) and v.get("state") == "working":
+            try:
+                reactor(bot, v.get("chat"), k, DONE_OK)
+            except Exception:
+                pass
+            _set_tag(bot, k, state="done", close_on_ack=None)
 
 
 def auto_ack(bot, prompt, dry_run=False, sender=None, reactor=None):
@@ -303,6 +404,18 @@ def auto_ack(bot, prompt, dry_run=False, sender=None, reactor=None):
                 reactor(bot, attrs.get("chat_id"), mid, SEEN)
             except Exception:
                 pass
+            if kind != "none":
+                try:
+                    _set_tag(bot, mid, chat=attrs.get("chat_id"), state="working")
+                except Exception:
+                    pass
+        elif not dry_run and mid != "?" and kind != "none":
+            try:
+                pending = reopen_tag(bot, attrs, reactor=reactor)
+            except Exception:
+                pending = None
+            if pending:
+                tag = f" GENERAL_PENDING_TAG={pending}"
         if kind == "none":
             lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=NONE reason={val}{tag}")
             continue
@@ -381,7 +494,10 @@ def main(argv):
                   " (edit it, delete it at the end with bot_tg.py delete); do NOT send another ACK."
                   " NONE = no ACK was sent; FAILED = send it yourself as before."
                   " GENERAL_TAG=1 = a tag in General: 👀 is already on it and the ACK is in your topic"
-                  " WORK_THREAD_ID; work and reply ONLY there, finish with bot_tg.py general-done)\n</system-reminder>")
+                  " WORK_THREAD_ID; work and reply ONLY there, finish with bot_tg.py general-done; stopping to"
+                  " ask Omer = bot_tg.py general-wait, NOT general-done."
+                  " GENERAL_PENDING_TAG=N = this answers your question on General tag N (now 👀 again):"
+                  " give the worker GENERAL_TAG_MSG_ID: N and close N with general-done only when truly done)\n</system-reminder>")
         return 0
     if cmd == "send":
         print(send(bot, _arg(argv, "--chat"), _arg(argv, "--text"), _arg(argv, "--thread"),
@@ -401,6 +517,9 @@ def main(argv):
         except Exception as e:
             print(f"[bot_tg] react failed: {e}")
         return 0
+    if cmd == "general-wait":
+        print(general_wait(bot, _arg(argv, "--chat"), _arg(argv, "--tag-msg"), _arg(argv, "--question-msg")))
+        return 0
     if cmd == "general-done":
         try:
             print(general_done(bot, _arg(argv, "--chat"), _arg(argv, "--tag-msg"), _arg(argv, "--summary"),
@@ -419,6 +538,10 @@ def main(argv):
             print(f"[bot_tg] {method} failed: {e}")
         if cmd == "delete":
             _typing("end_task", bot, None, msg)
+            try:
+                close_on_ack_delete(bot, msg)
+            except Exception:
+                pass
             conn = _conn(bot=bot)
             conn.execute("DELETE FROM bot_messages WHERE bot=? AND chat_id=? AND telegram_message_id=?",
                          (bot, chat, int(msg)))

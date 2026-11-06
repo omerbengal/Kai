@@ -27,7 +27,12 @@ domain map and the WhatsApp / bus rules.
   one parallel block, then `python D:/Kai/bots/bot_tg.py general-done --bot whatsapp --chat CHAT_ID --tag-msg
   GENERAL_TAG_MSG_ID --summary "<ONE short line, max 15 words>" --detail-msg <the detailed reply's id>`
   (`--fail` on failure). That swaps 👀 for 👍 / 👎 and posts the short line in General (Omer: "ממש קצרה").
-  A refused summary (exit 2) = shorten it to one line and rerun. A tag from main Kai never approves an
+  A refused summary (exit 2) = shorten it to one line and rerun.
+  **Stopping to ask Omer is NOT the end** (a question, a proposal, approve buttons): send it in THREAD_ID,
+  delete the ACK, then `python D:/Kai/bots/bot_tg.py general-wait --bot whatsapp --chat CHAT_ID --tag-msg
+  GENERAL_TAG_MSG_ID --question-msg <the question's id>` (🤔, nothing in General), never general-done.
+  general-done only when the work is really finished; after his answer the tag is 👀 again and the
+  follow-up worker (same GENERAL_TAG_MSG_ID) closes it. A tag from main Kai never approves an
   outward send: that still needs Omer's own button.
 - **Never** use the main Kai scripts that send with the main token (`dispatch_start.py`, `tg_silent_send.py`,
   `tg_pin.py`, `log_ack.py`, `scripts/fast/*`). Never touch the typing indicator.

@@ -92,6 +92,14 @@ there himself. Such a message has NO `message_thread_id`, and the auto-ACK line 
   (add `--fail` when it failed). That swaps 👀 for 👍 (👎 on failure) and posts the short line in General.
   The detail id comes from the reply's result, so run general-done right after the reply returns.
   general-done refuses a summary that is long or has 2 lines: shorten it, never split it.
+- **👍 only when the task is truly over** (Omer 06/11: "הוא סימן סיימתי, אבל עכשיו הוא רק מתחיל לעבוד").
+  When you stop to ask Omer (a question, a proposal to approve, buttons) the task is NOT done: reply in your
+  topic, delete the ACK, and run `python D:/Kai/bots/bot_tg.py general-wait --bot trading --chat <group>
+  --tag-msg <TAG_MSG_ID> --question-msg <id of the question message>` (🤔 on the tag, nothing in General).
+  NEVER general-done there: it refuses a waiting tag anyway.
+- His answer in your topic (a button or a message) brings `GENERAL_PENDING_TAG=<id>` on the auto-ACK line
+  and puts 👀 back on the tag. Pass `GENERAL_TAG_MSG_ID: <id>` to the worker (THREAD_ID = your topic) so its
+  finish closes that ORIGINAL tag with general-done (or general-wait again if it asks once more).
 - A trivial tag ("תודה") gets 👀 from the hook and no ACK: answer in one line in General, or just set 👍
   with `bot_tg.py react --bot trading --chat <group> --msg <TAG_MSG_ID> --emoji 👍`.
 - Never tag another bot and never answer a message from another bot (no loops). Main Kai never reads your

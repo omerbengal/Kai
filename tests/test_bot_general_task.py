@@ -194,3 +194,112 @@ def test_history_reads_the_bots_own_db(tmp_path):
     bot_tg.save("trading", "outgoing", GROUP, "117", 155, "NVDA מעל הממוצע", db_path=db)
     out = gh.history("trading", n=5, db_path=db)
     assert "NVDA מעל הממוצע" in out and "id=155" in out
+
+
+# --- 06/11/2026 fix (Omer msg 22669): 👍 only when the tagged task is truly finished ---------------------
+# The miluim bot answered a General tag with a proposal + button and closed it with 👍; Omer pressed the
+# button and the real work only started then. Now: a question = general-wait (🤔, no General line); Omer's
+# answer in the topic (callback on / reply to the question or the detail message) reopens the tag (👀) and
+# tells the session GENERAL_PENDING_TAG so its finish closes the original tag.
+
+def cb(mid, data="go"):
+    return (f'<channel source="plugin:telegram:telegram" chat_id="{GROUP}" message_id="{mid}" '
+            f'user="omer" user_id="${KAI_TELEGRAM_CHAT_ID}" message_thread_id="117" callback_data="{data}" '
+            f'ts="2026-11-06T07:05:00Z">[callback: {data}]</channel>')
+
+
+def reply_in_topic(mid, to, text="כן, תתקן"):
+    return (f'<channel source="plugin:telegram:telegram" chat_id="{GROUP}" message_id="{mid}" '
+            f'user="omer" user_id="${KAI_TELEGRAM_CHAT_ID}" message_thread_id="117" reply_to_message_id="{to}" '
+            f'ts="2026-11-06T07:05:00Z">{text}</channel>')
+
+
+def test_wait_emoji_is_an_allowed_bot_reaction():
+    assert bot_tg.WAITING == "🤔"
+
+
+def test_general_tag_is_registered_as_working(cfg):
+    bot_tg.auto_ack("trading", general(mid="600"), sender=Rec().send, reactor=Rec().react)
+    assert bot_tg.load_tags("trading")["600"]["state"] == "working"
+
+
+def test_general_wait_sets_thinking_and_posts_nothing_in_general(cfg):
+    r = Rec()
+    bot_tg.auto_ack("trading", general(mid="600"), sender=r.send, reactor=r.react)
+    r = Rec()
+    bot_tg.general_wait("trading", GROUP, "600", question_msg="650", reactor=r.react)
+    assert r.reacts == [(GROUP, "600", "🤔")] and r.sends == []
+    t = bot_tg.load_tags("trading")["600"]
+    assert t["state"] == "waiting" and t["question"] == "650"
+
+
+def test_general_done_refuses_while_waiting(cfg):
+    bot_tg.auto_ack("trading", general(mid="600"), sender=Rec().send, reactor=Rec().react)
+    bot_tg.general_wait("trading", GROUP, "600", question_msg="650", reactor=Rec().react)
+    r = Rec()
+    with pytest.raises(ValueError):
+        bot_tg.general_done("trading", GROUP, "600", "סיימתי", sender=r.send, reactor=r.react)
+    assert r.sends == [] and r.reacts == []
+
+
+def test_answer_by_button_reopens_the_waiting_tag(cfg):
+    bot_tg.auto_ack("trading", general(mid="600"), sender=Rec().send, reactor=Rec().react)
+    bot_tg.general_wait("trading", GROUP, "600", question_msg="650", reactor=Rec().react)
+    r = Rec()
+    lines = bot_tg.auto_ack("trading", cb("650"), sender=r.send, reactor=r.react)
+    assert (GROUP, "600", "👀") in r.reacts
+    assert "GENERAL_PENDING_TAG=600" in lines[0]
+    assert bot_tg.load_tags("trading")["600"]["state"] == "working"
+    # and now the finish closes it normally
+    r2 = Rec()
+    bot_tg.general_done("trading", GROUP, "600", "תוקן, הכניסה מהירה פי 4", detail_msg="700",
+                        sender=r2.send, reactor=r2.react)
+    assert r2.reacts == [(GROUP, "600", "👍")]
+    assert bot_tg.load_tags("trading")["600"]["state"] == "done"
+
+
+def test_answer_by_text_reply_reopens_the_waiting_tag(cfg):
+    bot_tg.auto_ack("trading", general(mid="600"), sender=Rec().send, reactor=Rec().react)
+    bot_tg.general_wait("trading", GROUP, "600", question_msg="650", reactor=Rec().react)
+    r = Rec()
+    lines = bot_tg.auto_ack("trading", reply_in_topic("660", "650"), sender=r.send, reactor=r.react)
+    assert (GROUP, "600", "👀") in r.reacts and "GENERAL_PENDING_TAG=600" in lines[0]
+
+
+def test_any_topic_message_reopens_the_only_waiting_tag(cfg):
+    # Omer answers without quoting: a waiting tag still gets reopened
+    bot_tg.auto_ack("trading", general(mid="600"), sender=Rec().send, reactor=Rec().react)
+    bot_tg.general_wait("trading", GROUP, "600", question_msg="650", reactor=Rec().react)
+    lines = bot_tg.auto_ack("trading", topic(mid="661"), sender=Rec().send, reactor=Rec().react)
+    assert "GENERAL_PENDING_TAG=600" in lines[0]
+
+
+def test_button_on_a_done_detail_message_reopens_it(cfg):
+    # the 06/11 case: closed with 👍 although the detail message carried a "go" button
+    bot_tg.auto_ack("trading", general(mid="600"), sender=Rec().send, reactor=Rec().react)
+    bot_tg.general_done("trading", GROUP, "600", "הצעה בנושא", detail_msg="650",
+                        sender=Rec().send, reactor=Rec().react)
+    r = Rec()
+    lines = bot_tg.auto_ack("trading", cb("650"), sender=r.send, reactor=r.react)
+    assert (GROUP, "600", "👀") in r.reacts and "GENERAL_PENDING_TAG=600" in lines[0]
+
+
+def test_plain_topic_message_does_not_reopen_a_done_tag(cfg):
+    bot_tg.auto_ack("trading", general(mid="600"), sender=Rec().send, reactor=Rec().react)
+    bot_tg.general_done("trading", GROUP, "600", "סיימתי", detail_msg="650",
+                        sender=Rec().send, reactor=Rec().react)
+    r = Rec()
+    lines = bot_tg.auto_ack("trading", topic(mid="662"), sender=r.send, reactor=r.react)
+    assert r.reacts == [] and "GENERAL_PENDING_TAG" not in lines[0]
+
+
+def test_close_on_ack_delete(cfg):
+    # one-off for a session that runs the old instructions: deleting that ACK sets 👍 on the tag
+    bot_tg.save_tags("trading", {"600": {"chat": GROUP, "state": "working", "close_on_ack": "901"}})
+    r = Rec()
+    bot_tg.close_on_ack_delete("trading", "901", reactor=r.react)
+    assert r.reacts == [(GROUP, "600", "👍")]
+    assert bot_tg.load_tags("trading")["600"]["state"] == "done"
+    r = Rec()
+    bot_tg.close_on_ack_delete("trading", "999", reactor=r.react)
+    assert r.reacts == []
