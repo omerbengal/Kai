@@ -72,8 +72,8 @@ def db_for(bot):
     return os.path.join(kai_bots.bot(bot)["home"], "bot.db")
 
 
-def _conn(db_path=DB_PATH, bot=None):
-    conn = sqlite3.connect(db_path or db_for(bot))
+def _conn(db_path=DB_PATH, bot=None, timeout=5.0):
+    conn = sqlite3.connect(db_path or db_for(bot), timeout=timeout)
     conn.text_factory = str
     conn.execute(SCHEMA)
     return conn
@@ -96,8 +96,9 @@ def api(name: str, method: str, **params):
         return json.loads(r.read().decode("utf-8"))
 
 
-def save(bot, direction, chat_id, thread_id, msg_id, text, reply_to=None, ts=None, db_path=DB_PATH):
-    conn = _conn(db_path, bot)
+def save(bot, direction, chat_id, thread_id, msg_id, text, reply_to=None, ts=None, db_path=DB_PATH,
+         db_timeout=5.0):
+    conn = _conn(db_path, bot, timeout=db_timeout)
     conn.execute(
         "INSERT INTO bot_messages (bot, chat_id, thread_id, telegram_message_id, direction, text,"
         " reply_to_message_id, ts) VALUES (?,?,?,?,?,?,?,?)",
@@ -207,13 +208,14 @@ def send(bot, chat, text, thread=None, reply_to=None, silent=False, timeout=15):
     mid = int(data["result"]["message_id"])
     try:
         save(bot, "outgoing", str(chat), str(thread) if thread else None, mid, text,
-             int(reply_to) if reply_to else None)
+             int(reply_to) if reply_to else None, db_timeout=min(timeout, 5))
     except Exception:
         pass
     return mid
 
 
 TEXT_ACK = "🔄 ⏳"
+HOOK_NET_TIMEOUT = 2   # per network call inside the auto-ACK hook (its hard limit is 8 s, 06/11/2026)
 SEEN = "👀"       # ReactionTypeEmoji is a fixed list (checked 06/11/2026): ✅ and skin tones are NOT on it
 DONE_OK = "👍"
 DONE_FAIL = "👎"
@@ -256,13 +258,13 @@ def is_general(bot, attrs):
             and not attrs.get("message_thread_id") and attrs.get("event_type") != "reaction")
 
 
-def react(bot, chat, msg, emoji):
+def react(bot, chat, msg, emoji, timeout=10):
     """setMessageReaction with this bot's token; a new call replaces this bot's previous reaction."""
     payload = {"chat_id": chat, "message_id": int(msg), "reaction": [{"type": "emoji", "emoji": emoji}]}
     req = urllib.request.Request(
         f"https://api.telegram.org/bot{token(bot)}/setMessageReaction",
         data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=10) as r:
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         data = json.loads(r.read().decode("utf-8"))
     if not data.get("ok"):
         raise RuntimeError(str(data)[:200])
@@ -275,7 +277,8 @@ def topic_link(group_id, thread, msg):
     return f"https://t.me/c/{internal}/{thread}/{msg}"
 
 
-def general_done(bot, chat, tag_msg, summary, ok=True, detail_msg=None, sender=None, reactor=None):
+def general_done(bot, chat, tag_msg, summary, ok=True, detail_msg=None, sender=None, reactor=None,
+                 deleter=None):
     """End of a General task: 👍 / 👎 on the tag message + ONE short line in General (reply to the tag).
     Omer 06/11: "הודעת הסיכום צריכה להיות ממש קצרה" - a long or multi-line summary is refused here."""
     sender, reactor = sender or send, reactor or react
@@ -294,6 +297,7 @@ def general_done(bot, chat, tag_msg, summary, ok=True, detail_msg=None, sender=N
         _set_tag(bot, tag_msg, chat=chat, state="done", detail=str(detail_msg) if detail_msg else None)
     except Exception:
         pass
+    close_tag_ack(bot, chat, tag_msg, deleter)
     text = "‏" + s
     if detail_msg:
         text += "\n‏" + topic_link(kai_bots.bot(bot).get("group_id"), own_topic(bot), detail_msg)
@@ -338,6 +342,39 @@ def _set_tag(bot, tag, **fields):
     return t
 
 
+def drop_ack(bot, chat, ack_id):
+    """Delete a bot ACK: deleteMessage + end its typing task + drop its bot_messages row (= the `delete` CLI)."""
+    try:
+        api(bot, "deleteMessage", chat_id=chat, message_id=ack_id)
+    finally:
+        _typing("end_task", bot, None, ack_id)
+        try:
+            conn = _conn(bot=bot)
+            conn.execute("DELETE FROM bot_messages WHERE bot=? AND chat_id=? AND telegram_message_id=?",
+                         (bot, str(chat), int(ack_id)))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+
+def close_tag_ack(bot, chat, tag_msg, deleter=None):
+    """The ACK the hook sent for a General tag is deleted when the tag closes or waits (06/11/2026, Omer
+    msg 273: a tag closed with a plain `react 👍` left the ACK in the topic). Never raises."""
+    try:
+        ack = load_tags(bot).get(str(tag_msg), {}).get("ack")
+        if not ack:
+            return False
+        try:
+            (deleter or drop_ack)(bot, chat, ack)
+        except Exception:
+            pass
+        _set_tag(bot, tag_msg, ack=None)
+        return True
+    except Exception:
+        return False
+
+
 def log_react_failure(bot, chat, msg, emoji, err):
     """A failed reaction used to vanish silently (whatsapp 👀 on tag 236, 06/11/2026). Never raises."""
     try:
@@ -360,7 +397,7 @@ def seen_with_retry(bot, chat, msg, reactor):
     return False
 
 
-def react_tag(bot, chat, msg, emoji, reactor=None):
+def react_tag(bot, chat, msg, emoji, reactor=None, deleter=None):
     """`react` CLI: a 👍 / 👎 on a tracked General tag also closes it in general_tags.json (a trivial tag
     closed by a plain react stayed "working", 06/11/2026). A waiting tag (🤔) refuses, like general-done."""
     reactor = reactor or react
@@ -371,10 +408,11 @@ def react_tag(bot, chat, msg, emoji, reactor=None):
     reactor(bot, chat, msg, emoji)
     if t and closing:
         _set_tag(bot, msg, state="done")
+        close_tag_ack(bot, chat, msg, deleter)
     return True
 
 
-def general_wait(bot, chat, tag_msg, question_msg=None, reactor=None):
+def general_wait(bot, chat, tag_msg, question_msg=None, reactor=None, deleter=None):
     """The bot stopped to ask Omer (question / proposal / buttons): 🤔 on the tag, NO line in General."""
     reactor = reactor or react
     try:
@@ -382,6 +420,7 @@ def general_wait(bot, chat, tag_msg, question_msg=None, reactor=None):
     except Exception:
         pass
     _set_tag(bot, tag_msg, chat=chat, state="waiting", question=str(question_msg) if question_msg else None)
+    close_tag_ack(bot, chat, tag_msg, deleter)
     return "waiting"
 
 
@@ -425,9 +464,26 @@ def close_on_ack_delete(bot, ack_id, reactor=None):
             _set_tag(bot, k, state="done", close_on_ack=None)
 
 
+def _hook_react(bot, chat, msg, emoji):
+    return react(bot, chat, msg, emoji, timeout=HOOK_NET_TIMEOUT)
+
+
+def _timing(bot, msg, t0, ack):
+    """One line per hook run: the hook is killed at 8 s and then leaves no other trace. Never raises."""
+    import time as _t
+    try:
+        p = os.path.join(kai_bots.bot(bot)["home"], "tmp", "auto_ack_timing.log")
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.now(timezone.utc).isoformat()} msg={msg} ack={ack} {(_t.time() - t0):.2f}s\n")
+    except Exception:
+        pass
+
+
 def auto_ack(bot, prompt, dry_run=False, sender=None, reactor=None):
     import auto_ack as main_ack
-    sender, reactor = sender or send, reactor or react
+    import time as _t
+    sender, reactor = sender or send, reactor or _hook_react
+    t0 = _t.time()
     reg = os.path.join(kai_bots.bot(bot)["home"], "tmp", "auto_ack")
     lines = []
     for attrs, content in main_ack.parse_channels(prompt):
@@ -476,8 +532,15 @@ def auto_ack(bot, prompt, dry_run=False, sender=None, reactor=None):
                              reply_to=mid, silent=True, timeout=3)
             with open(key, "w", encoding="utf-8") as f:
                 f.write(str(ack))
+            if gen:
+                try:
+                    _set_tag(bot, mid, ack=str(ack))
+                except Exception:
+                    pass
             _typing("attach_ack", bot, mid, ack)
             lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID={ack}{tag}")
+            if not dry_run:
+                _timing(bot, mid, t0, ack)
         except Exception as e:
             try:
                 os.remove(key)

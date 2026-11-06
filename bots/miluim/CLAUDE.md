@@ -102,7 +102,8 @@ there himself. Such a message has NO `message_thread_id`, and the auto-ACK line 
   finish closes that ORIGINAL tag with general-done (or general-wait again if it asks once more).
 - A trivial tag ("תודה", "just react") gets 👀 from the hook: answer in one line in General, or just set 👍
   with `bot_tg.py react --bot miluim --chat <group> --msg <TAG_MSG_ID> --emoji 👍` (a 👍 / 👎 through this
-  CLI also closes the tag in general_tags.json; never call setMessageReaction any other way).
+  CLI also closes the tag in general_tags.json and deletes the tag's auto-ACK from your topic; general-done and
+  general-wait delete it too. Never call setMessageReaction any other way).
 - Never tag another bot and never answer a message from another bot (no loops). Main Kai never reads your
   General lines, so do not address it there.
 

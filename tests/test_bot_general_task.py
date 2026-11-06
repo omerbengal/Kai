@@ -24,6 +24,7 @@ def cfg(tmp_path, monkeypatch):
     c = {"title": "קאי השקעות", "home": str(tmp_path), "state_dir": str(tmp_path / "st"),
          "username": "kai__invest_bot", "group_id": GROUP, "topics": ["117"], "topic_name": "📈"}
     monkeypatch.setattr(bot_tg.kai_bots, "bot", lambda name, *a, **k: c)
+    monkeypatch.setattr(bot_tg, "drop_ack", lambda *a: None)  # never a real deleteMessage from a test
     return c
 
 
@@ -349,3 +350,92 @@ def test_react_on_an_untracked_message_just_reacts(cfg):
     r = Rec()
     bot_tg.react_tag("trading", GROUP, "999", "👍", reactor=r.react)
     assert r.reacts == [(GROUP, "999", "👍")] and "999" not in bot_tg.load_tags("trading")
+
+
+# 06/11/2026 (Omer msg 273): a General tag closed with a plain `react 👍` left the bot's ACK in its topic.
+# The ACK id now lives on the tag, and closing the tag (react 👍/👎, general-done, general-wait) deletes it.
+class Del:
+    def __init__(self):
+        self.deleted = []
+
+    def __call__(self, bot, chat, msg):
+        self.deleted.append((chat, str(msg)))
+
+
+def test_auto_ack_stores_the_ack_on_the_tag(cfg):
+    bot_tg.auto_ack("trading", general(mid="800"), sender=Rec().send, reactor=Rec().react)
+    assert bot_tg.load_tags("trading")["800"]["ack"] == "901"
+
+
+def test_react_close_deletes_the_tracked_ack(cfg):
+    bot_tg.auto_ack("trading", general(mid="801"), sender=Rec().send, reactor=Rec().react)
+    d = Del()
+    bot_tg.react_tag("trading", GROUP, "801", "👍", reactor=Rec().react, deleter=d)
+    assert d.deleted == [(GROUP, "901")]
+    assert not bot_tg.load_tags("trading")["801"].get("ack")
+
+
+def test_react_eyes_does_not_delete_the_ack(cfg):
+    bot_tg.auto_ack("trading", general(mid="802"), sender=Rec().send, reactor=Rec().react)
+    d = Del()
+    bot_tg.react_tag("trading", GROUP, "802", "👀", reactor=Rec().react, deleter=d)
+    assert d.deleted == [] and bot_tg.load_tags("trading")["802"]["ack"] == "901"
+
+
+def test_general_done_deletes_the_tracked_ack(cfg):
+    bot_tg.auto_ack("trading", general(mid="803"), sender=Rec().send, reactor=Rec().react)
+    d = Del()
+    bot_tg.general_done("trading", GROUP, "803", "סיימתי", sender=Rec().send, reactor=Rec().react, deleter=d)
+    assert d.deleted == [(GROUP, "901")]
+
+
+def test_general_wait_deletes_the_tracked_ack(cfg):
+    bot_tg.auto_ack("trading", general(mid="804"), sender=Rec().send, reactor=Rec().react)
+    d = Del()
+    bot_tg.general_wait("trading", GROUP, "804", question_msg="850", reactor=Rec().react, deleter=d)
+    assert d.deleted == [(GROUP, "901")]
+
+
+def test_ack_delete_failure_never_blocks_the_close(cfg):
+    bot_tg.auto_ack("trading", general(mid="805"), sender=Rec().send, reactor=Rec().react)
+
+    def boom(*a):
+        raise RuntimeError("message to delete not found")
+    r = Rec()
+    bot_tg.react_tag("trading", GROUP, "805", "👍", reactor=r.react, deleter=boom)
+    assert r.reacts == [(GROUP, "805", "👍")] and bot_tg.load_tags("trading")["805"]["state"] == "done"
+
+
+# 06/11/2026 11:00 UTC: the auto-ACK hook (8 s limit) was killed in all three bots after the ACK was sent and
+# before AUTO_ACK_MSG_ID reached the bot, so nobody knew the ACK id. Every network/DB step in the hook now has
+# a short budget, and the ACK id is on the tag right after the send.
+def test_hook_eyes_uses_a_short_network_timeout(cfg, monkeypatch):
+    seen = []
+    monkeypatch.setattr(bot_tg, "react", lambda b, c, m, e, timeout=10: seen.append(timeout) or True)
+    bot_tg.auto_ack("trading", general(mid="900"), sender=Rec().send)
+    assert seen and max(seen) <= bot_tg.HOOK_NET_TIMEOUT <= 3
+
+
+def test_send_saves_with_the_short_db_timeout(cfg, monkeypatch):
+    got = {}
+
+    class R:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b'{"ok": true, "result": {"message_id": 42}}'
+    monkeypatch.setattr(bot_tg.urllib.request, "urlopen", lambda req, timeout=None: R())
+    monkeypatch.setattr(bot_tg, "token", lambda name: "T")
+    monkeypatch.setattr(bot_tg, "save", lambda *a, **k: got.update(k))
+    assert bot_tg.send("trading", GROUP, "x", thread="117", timeout=3) == 42
+    assert got.get("db_timeout") == 3
+
+
+def test_hook_logs_its_duration(cfg, tmp_path):
+    bot_tg.auto_ack("trading", general(mid="901"), sender=Rec().send, reactor=Rec().react)
+    log = open(os.path.join(str(tmp_path), "tmp", "auto_ack_timing.log"), encoding="utf-8").read()
+    assert "msg=901" in log and "ack=901" in log
