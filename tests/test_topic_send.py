@@ -59,7 +59,7 @@ def test_bot_send_failure_falls_back_to_private_chat(cfg):
     mid, where = ts.send("trading", "‏התראה", post=net)
     assert where == "private" and mid == 4002
     tok, p = net.calls[1]
-    assert tok.startswith("<REDACTED_SECRET>:") and p["chat_id"] == "${KAI_TELEGRAM_CHAT_ID}" and "message_thread_id" not in p
+    assert tok == ts.main_token() and p["chat_id"] == ts.OMER_CHAT and "message_thread_id" not in p
 
 
 def test_unknown_domain_or_missing_token_uses_private(cfg, tmp_path):
