@@ -524,9 +524,9 @@ def auto_ack(bot, prompt, dry_run=False, sender=None, reactor=None):
             lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID={prev or 'FAILED'} (already sent){tag}")
             continue
         try:
-            if gen:  # the work happens in the bot's own topic, never in General
+            if gen:  # the work happens in the bot's own topic, as a reply quoting the General tag (Omer 06/11)
                 ack = sender(bot, attrs.get("chat_id"), val, thread=own_topic(bot),
-                             reply_to=None, silent=True, timeout=3)
+                             reply_to=mid, silent=True, timeout=3)
             else:
                 ack = sender(bot, attrs.get("chat_id"), val, thread=attrs.get("message_thread_id"),
                              reply_to=mid, silent=True, timeout=3)
@@ -590,7 +590,9 @@ def main(argv):
                   " (edit it, delete it at the end with bot_tg.py delete); do NOT send another ACK."
                   " NONE = no ACK was sent; FAILED = send it yourself as before."
                   " GENERAL_TAG=1 = a tag in General: 👀 is already on it and the ACK is in your topic"
-                  " WORK_THREAD_ID; work and reply ONLY there, finish with bot_tg.py general-done; stopping to"
+                  " WORK_THREAD_ID; work and reply ONLY there, finish with bot_tg.py general-done; the detailed"
+                  " final reply in the topic = reply tool with message_thread_id=WORK_THREAD_ID and"
+                  " reply_to=TAG_MSG_ID (it quotes the General tag); stopping to"
                   " ask Omer = bot_tg.py general-wait, NOT general-done."
                   " GENERAL_PENDING_TAG=N = this answers your question on General tag N (now 👀 again):"
                   " give the worker GENERAL_TAG_MSG_ID: N and close N with general-done only when truly done)\n</system-reminder>")

@@ -22,8 +22,9 @@ domain map and the WhatsApp / bus rules.
 - **Finish (and on error), in ONE parallel block:** the final `reply`, and
   `python D:/Kai/bots/bot_tg.py delete --bot whatsapp --chat CHAT_ID --msg ACK_MSG_ID`.
 - **A General task** (the block has `GENERAL_TAG_MSG_ID`, `ORIGINAL_MSG_ID: NONE`): main Kai tagged the bot in
-  the group's General topic. Everything happens in THREAD_ID (the bot's own topic) with no `reply_to`;
-  nothing goes to General except the end. **Finish:** the detailed `reply` in THREAD_ID and the ACK delete in
+  the group's General topic. Everything happens in THREAD_ID (the bot's own topic) with no `reply_to`, except
+  the detailed final `reply`: `message_thread_id=THREAD_ID` + `reply_to=GENERAL_TAG_MSG_ID`, so it quotes the
+  tag (Omer 06/11/2026); nothing goes to General except the end. **Finish:** that detailed `reply` and the ACK delete in
   one parallel block, then `python D:/Kai/bots/bot_tg.py general-done --bot whatsapp --chat CHAT_ID --tag-msg
   GENERAL_TAG_MSG_ID --summary "<ONE short line, max 15 words>" --detail-msg <the detailed reply's id>`
   (`--fail` on failure). That swaps 👀 for 👍 / 👎 and posts the short line in General (Omer: "ממש קצרה").

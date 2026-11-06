@@ -103,7 +103,10 @@ there himself. Such a message has NO `message_thread_id`, and the auto-ACK line 
 - 👀 is already on the tag message (the hook did it) and the ACK is already in YOUR topic. Do ALL the work
   there: ACK edits, questions, buttons, the detailed result. Never post work, questions or ACKs in General.
 - In the worker block use `THREAD_ID: <WORK_THREAD_ID>` and add `GENERAL_TAG_MSG_ID: <TAG_MSG_ID>`, and
-  `ORIGINAL_MSG_ID: NONE` (the tag lives in General; a reply_to it from your topic would fail).
+  `ORIGINAL_MSG_ID: NONE` (questions and progress in your topic carry no reply_to).
+- The ACK in your topic is a reply quoting the General tag (the hook does it). The detailed summary is one too
+  (Omer 06/11/2026): `reply` with `message_thread_id=<WORK_THREAD_ID>` AND `reply_to=<TAG_MSG_ID>`. It works
+  across topics: the message stays in your topic and quotes the tag.
 - The end (worker or inline), in ONE parallel block: the detailed summary with `reply` in your topic, the ACK
   delete, and then `python D:/Kai/bots/bot_tg.py general-done --bot whatsapp --chat <group> --tag-msg
   <TAG_MSG_ID> --summary "<ONE short line, max 15 words>" --detail-msg <id of the detailed reply>`

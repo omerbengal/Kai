@@ -65,7 +65,8 @@ def test_general_tag_acks_in_own_topic_and_reacts_eyes(cfg):
     assert r.reacts == [(GROUP, "500", "👀")]
     assert len(r.sends) == 1
     s = r.sends[0]
-    assert s["thread"] == "117" and s["reply_to"] is None and s["chat"] == GROUP
+    # 06/11/2026 (Omer msg 320): the ACK sits in the bot's own topic as a reply quoting the General tag
+    assert s["thread"] == "117" and s["reply_to"] == "500" and s["chat"] == GROUP
     assert "AUTO_ACK_MSG_ID=901" in lines[0]
     assert "GENERAL_TAG=1" in lines[0] and "TAG_MSG_ID=500" in lines[0] and "WORK_THREAD_ID=117" in lines[0]
 
@@ -439,3 +440,14 @@ def test_hook_logs_its_duration(cfg, tmp_path):
     bot_tg.auto_ack("trading", general(mid="901"), sender=Rec().send, reactor=Rec().react)
     log = open(os.path.join(str(tmp_path), "tmp", "auto_ack_timing.log"), encoding="utf-8").read()
     assert "msg=901" in log and "ack=901" in log
+
+
+def test_hook_tells_the_bot_to_reply_its_summary_to_the_tag(cfg, monkeypatch, capsys):
+    import io
+    import json as _j
+    monkeypatch.setattr(bot_tg, "send", Rec().send)
+    monkeypatch.setattr(bot_tg, "_hook_react", Rec().react)
+    monkeypatch.setattr(bot_tg.sys, "stdin", io.TextIOWrapper(io.BytesIO(_j.dumps({"prompt": general(mid="910")}).encode())))
+    bot_tg.main(["bot_tg.py", "auto-ack", "--bot", "trading"])
+    out = capsys.readouterr().out
+    assert "reply_to=TAG_MSG_ID" in out and "message_thread_id=WORK_THREAD_ID" in out
