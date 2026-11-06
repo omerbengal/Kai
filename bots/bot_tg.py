@@ -338,6 +338,42 @@ def _set_tag(bot, tag, **fields):
     return t
 
 
+def log_react_failure(bot, chat, msg, emoji, err):
+    """A failed reaction used to vanish silently (whatsapp 👀 on tag 236, 06/11/2026). Never raises."""
+    try:
+        p = os.path.join(kai_bots.bot(bot)["home"], "tmp", "react_failures.log")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.now(timezone.utc).isoformat()} {bot} chat={chat} msg={msg} {emoji} {err}\n")
+    except Exception:
+        pass
+
+
+def seen_with_retry(bot, chat, msg, reactor):
+    """👀 on a General tag: one retry after a failure, each failure logged; never blocks the ACK."""
+    for attempt in (1, 2):
+        try:
+            reactor(bot, chat, msg, SEEN)
+            return True
+        except Exception as e:
+            log_react_failure(bot, chat, msg, SEEN, f"attempt={attempt} {e}")
+    return False
+
+
+def react_tag(bot, chat, msg, emoji, reactor=None):
+    """`react` CLI: a 👍 / 👎 on a tracked General tag also closes it in general_tags.json (a trivial tag
+    closed by a plain react stayed "working", 06/11/2026). A waiting tag (🤔) refuses, like general-done."""
+    reactor = reactor or react
+    t = load_tags(bot).get(str(msg))
+    closing = emoji in (DONE_OK, DONE_FAIL)
+    if t and closing and t.get("state") == "waiting":
+        raise ValueError(f"tag {msg} is waiting for Omer's answer: no 👍 yet")
+    reactor(bot, chat, msg, emoji)
+    if t and closing:
+        _set_tag(bot, msg, state="done")
+    return True
+
+
 def general_wait(bot, chat, tag_msg, question_msg=None, reactor=None):
     """The bot stopped to ask Omer (question / proposal / buttons): 🤔 on the tag, NO line in General."""
     reactor = reactor or react
@@ -400,10 +436,7 @@ def auto_ack(bot, prompt, dry_run=False, sender=None, reactor=None):
         gen = mid != "?" and is_general(bot, attrs)
         tag = f" GENERAL_TAG=1 TAG_MSG_ID={mid} WORK_THREAD_ID={own_topic(bot)}" if gen else ""
         if gen and not dry_run:
-            try:
-                reactor(bot, attrs.get("chat_id"), mid, SEEN)
-            except Exception:
-                pass
+            seen_with_retry(bot, attrs.get("chat_id"), mid, reactor)
             if kind != "none":
                 try:
                     _set_tag(bot, mid, chat=attrs.get("chat_id"), state="working")
@@ -512,9 +545,10 @@ def main(argv):
         return 0
     if cmd == "react":
         try:
-            react(bot, _arg(argv, "--chat"), _arg(argv, "--msg"), _arg(argv, "--emoji", SEEN))
+            react_tag(bot, _arg(argv, "--chat"), _arg(argv, "--msg"), _arg(argv, "--emoji", SEEN))
             print("ok")
         except Exception as e:
+            log_react_failure(bot, _arg(argv, "--chat"), _arg(argv, "--msg"), _arg(argv, "--emoji", SEEN), e)
             print(f"[bot_tg] react failed: {e}")
         return 0
     if cmd == "general-wait":

@@ -303,3 +303,49 @@ def test_close_on_ack_delete(cfg):
     r = Rec()
     bot_tg.close_on_ack_delete("trading", "999", reactor=r.react)
     assert r.reacts == []
+
+
+# 06/11/2026 (Omer msg 242): the whatsapp bot's 👀 on tag 236 never showed, and the failure left no trace.
+def test_eyes_failure_is_retried_once(cfg):
+    r = Rec()
+    calls = []
+
+    def flaky(bot, chat, msg, emoji):
+        calls.append(emoji)
+        if len(calls) == 1:
+            raise RuntimeError("timeout")
+        return r.react(bot, chat, msg, emoji)
+    bot_tg.auto_ack("trading", general(mid="700"), sender=r.send, reactor=flaky)
+    assert calls == ["👀", "👀"] and r.reacts == [(GROUP, "700", "👀")]
+
+
+def test_eyes_failure_is_logged(cfg, tmp_path):
+    def boom(*a, **k):
+        raise RuntimeError("HTTP 429")
+    bot_tg.auto_ack("trading", general(mid="701"), sender=Rec().send, reactor=boom)
+    log = open(os.path.join(str(tmp_path), "tmp", "react_failures.log"), encoding="utf-8").read()
+    assert "701" in log and "HTTP 429" in log
+
+
+# A trivial tag closed with a plain `react 👍` stayed "working" in general_tags.json (06/11/2026).
+def test_react_done_on_a_working_tag_marks_it_done(cfg):
+    bot_tg.auto_ack("trading", general(mid="702"), sender=Rec().send, reactor=Rec().react)
+    r = Rec()
+    bot_tg.react_tag("trading", GROUP, "702", "👍", reactor=r.react)
+    assert r.reacts == [(GROUP, "702", "👍")]
+    assert bot_tg.load_tags("trading")["702"]["state"] == "done"
+
+
+def test_react_done_refuses_a_waiting_tag(cfg):
+    bot_tg.auto_ack("trading", general(mid="703"), sender=Rec().send, reactor=Rec().react)
+    bot_tg.general_wait("trading", GROUP, "703", question_msg="750", reactor=Rec().react)
+    r = Rec()
+    with pytest.raises(ValueError):
+        bot_tg.react_tag("trading", GROUP, "703", "👍", reactor=r.react)
+    assert r.reacts == [] and bot_tg.load_tags("trading")["703"]["state"] == "waiting"
+
+
+def test_react_on_an_untracked_message_just_reacts(cfg):
+    r = Rec()
+    bot_tg.react_tag("trading", GROUP, "999", "👍", reactor=r.react)
+    assert r.reacts == [(GROUP, "999", "👍")] and "999" not in bot_tg.load_tags("trading")

@@ -100,8 +100,9 @@ there himself. Such a message has NO `message_thread_id`, and the auto-ACK line 
 - His answer in your topic (a button or a message) brings `GENERAL_PENDING_TAG=<id>` on the auto-ACK line
   and puts 👀 back on the tag. Pass `GENERAL_TAG_MSG_ID: <id>` to the worker (THREAD_ID = your topic) so its
   finish closes that ORIGINAL tag with general-done (or general-wait again if it asks once more).
-- A trivial tag ("תודה") gets 👀 from the hook and no ACK: answer in one line in General, or just set 👍
-  with `bot_tg.py react --bot trading --chat <group> --msg <TAG_MSG_ID> --emoji 👍`.
+- A trivial tag ("תודה", "just react") gets 👀 from the hook: answer in one line in General, or just set 👍
+  with `bot_tg.py react --bot trading --chat <group> --msg <TAG_MSG_ID> --emoji 👍` (a 👍 / 👎 through this
+  CLI also closes the tag in general_tags.json; never call setMessageReaction any other way).
 - Never tag another bot and never answer a message from another bot (no loops). Main Kai never reads your
   General lines, so do not address it there.
 
