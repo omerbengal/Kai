@@ -91,8 +91,12 @@ def _payload(chat, text, thread=None, reply_to=None, keyboard=None):
     return p
 
 
-def send(domain, text, reply_to=None, keyboard=None, post=post):
-    """(message_id, 'topic' | 'private') or (None, None) if both sends failed."""
+def send(domain, text, reply_to=None, keyboard=None, post=post, private_reply_to=None):
+    """(message_id, 'topic' | 'private') or (None, None) if both sends failed.
+
+    reply_to = a message in the TOPIC (e.g. the watcher's own earlier alert there). private_reply_to = a
+    message in Omer's PRIVATE chat (e.g. his entry message for a position): used only by the private
+    fallback, never in the topic, where that id is another message or none (swing/position watch, 06/11)."""
     cfg = (kai_bots.load_config() or {}).get(domain)
     token = bot_token(cfg) if cfg and cfg.get("group_id") and cfg.get("topics") else None
     if token:
@@ -105,7 +109,7 @@ def send(domain, text, reply_to=None, keyboard=None, post=post):
             sys.stderr.write(f"[topic_send] {domain} topic send failed, falling back to private: {e}\n")
     try:
         # reply_to belongs to the topic's number space; never quote it in the private chat
-        mid = post(main_token(), _payload(OMER_CHAT, text, keyboard=keyboard))
+        mid = post(main_token(), _payload(OMER_CHAT, text, reply_to=private_reply_to, keyboard=keyboard))
     except Exception as e:
         sys.stderr.write(f"[topic_send] private fallback failed: {e}\n")
         return None, None

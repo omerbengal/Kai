@@ -81,3 +81,57 @@ def test_keyboard_is_sent_as_reply_markup(cfg):
     assert net.calls[0][1]["reply_markup"] == {"inline_keyboard": kb}
 
 
+def test_private_reply_to_is_used_only_in_the_private_fallback(cfg):
+    # the entry message lives in the private chat: its id means nothing (or another message) in the topic
+    net = Net()
+    ts.send("trading", "x", private_reply_to=18594, post=net)
+    assert "reply_parameters" not in net.calls[0][1]
+    net = Net(fail_tokens={"111:trading"})
+    ts.send("trading", "x", private_reply_to=18594, post=net)
+    assert net.calls[1][1]["reply_parameters"] == {"message_id": 18594, "allow_sending_without_reply": True}
+
+
+def test_position_scripts_send_through_the_trading_topic():
+    for f in ("swing_watch.py", "position_watch.py"):
+        src = open(os.path.join("D:/Kai/scripts", f), encoding="utf-8").read()
+        assert "/sendMessage" not in src, f
+        assert "topic_send.send(\"trading\"" in src, f
+        assert "private_reply_to=" in src, f
+
+
+def _capture(monkeypatch, mod):
+    calls = []
+
+    def fake(domain, text, reply_to=None, keyboard=None, private_reply_to=None):
+        calls.append(dict(domain=domain, text=text, reply_to=reply_to, keyboard=keyboard,
+                          private_reply_to=private_reply_to))
+        return 777, "topic"
+    monkeypatch.setattr(ts, "send", fake)
+    monkeypatch.setattr(mod, "DB_PATH", ":memory:")
+    monkeypatch.setattr(mod, "LOG", os.devnull)
+    return calls
+
+
+def test_swing_watch_alert_with_buttons_goes_to_the_topic(monkeypatch):
+    import swing_watch
+    calls = _capture(monkeypatch, swing_watch)
+    kb = swing_watch.close_buttons("GTM")
+    assert swing_watch.send(["⚠️ GTM ליד הסטופ"], 18594, kb) == 777
+    c = calls[0]
+    assert c["domain"] == "trading" and c["keyboard"] == kb and c["reply_to"] is None
+    assert c["private_reply_to"] == 18594 and "GTM" in c["text"]
+
+
+def test_position_watch_alert_goes_to_the_topic(monkeypatch):
+    import position_watch
+    calls = _capture(monkeypatch, position_watch)
+    assert position_watch.send("🎯 PEGA נגעה ביעד", "17942") == 777
+    c = calls[0]
+    assert c["domain"] == "trading" and c["reply_to"] is None and c["private_reply_to"] == "17942"
+
+
+def test_pos_callbacks_belong_to_the_trading_bot_with_a_private_fallback():
+    dom = open("D:/Kai/bots/_domains/trading.md", encoding="utf-8").read()
+    assert "pos_sold" in dom and "swing_watch.py --close" in dom
+    lst = open("D:/Kai/agents/listener.md", encoding="utf-8").read()
+    i = lst.index("
