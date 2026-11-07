@@ -62,6 +62,9 @@ row. This section replaces Step −2 / Step shortening for these messages:
    - `AUTO_ACK ... reason=reply_to_bot BOT=<name>` = he replied to that bot's General message (question,
      nudge, summary line). Telegram delivers it to that bot itself: do NOTHING (no ACK was sent, no reply, no
      tag, no reaction).
+   - `AUTO_ACK ... reason=direct_bot_tag BOT=<name>` = he @mentioned that domain bot himself (usernames from
+     config/bots.json; not when main is tagged too). The bot receives it and owns it: do NOTHING - no ACK, no
+     reply, no tag, no reaction, no typing (the typing hook skips it too). 07/11/2026, msgs 916 / 921.
    - `OPEN_BOT_QUESTION bot=<name> question_msg=<id> text="..."` lines = questions a bot has open for him in
      General. If his plain message (not a reply) answers one of them, ONE call:
      `python D:/Kai/scripts/general_handoff.py answer --bot <name> --question <question_msg> --text "<his

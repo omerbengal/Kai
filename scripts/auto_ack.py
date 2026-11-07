@@ -23,6 +23,8 @@ Output (stdout, injected into the model's context), one line per channel block:
     AUTO_ACK message_id=<telegram msg id> AUTO_ACK_MSG_ID=<ack id>     (ACK sent / already sent)
     AUTO_ACK message_id=<id> AUTO_ACK_MSG_ID=FAILED                    (dispatcher sends it manually)
     AUTO_ACK message_id=<id> AUTO_ACK_MSG_ID=NONE reason=<trivial|reaction|other_chat>
+    AUTO_ACK message_id=<id> AUTO_ACK_MSG_ID=NONE reason=<direct_bot_tag|reply_to_bot> BOT=<name>
+        (General: Omer @mentioned a domain bot / replied to its message - the bot owns it, main does nothing)
 Nothing at all for prompts without a channel block (cron, system, terminal input).
 
 Idempotent per message: tmp/auto_ack/<key>.ack is created with O_EXCL, so a re-delivered prompt
@@ -136,6 +138,49 @@ def bot_reply_owner(attrs):
 
 
 MAIN_USERNAME = "Nova_PersonalAssistant_Bengi_bot"
+
+
+def _bot_usernames():
+    """{lowercase username: bot name} from config/bots.json (kai_bots), never hard-coded. Never raises."""
+    try:
+        import kai_bots
+        return {str(c["username"]).lstrip("@").lower(): n for n, c in kai_bots.load_config().items()
+                if c.get("username")}
+    except Exception:
+        return {}
+
+
+def direct_bot_tag(attrs, content, usernames=None):
+    """Omer @mentioning a DOMAIN bot in General (07/11/2026, Omer msgs 916 / 921 / 925): Telegram delivers it to
+    that bot, which owns it, so main sends no ACK and does nothing. Returns the bot name, else None.
+    Not for callbacks, not when main Kai is tagged too. Never raises."""
+    if not is_general(attrs) or "callback_data" in attrs:
+        return None
+    text = (content or "").lower()
+    if not text or f"@{MAIN_USERNAME}".lower() in text:
+        return None
+    names = usernames if usernames is not None else _bot_usernames()
+    hits = []
+    for uname, name in names.items():
+        m = re.search(r"(?<![\w@])@" + re.escape(uname) + r"(?!\w)", text)
+        if m:
+            hits.append((m.start(), name))
+    return min(hits)[1] if hits else None
+
+
+def bot_owned(attrs, content):
+    """('direct_bot_tag' | 'reply_to_bot', bot) when Omer's General message belongs to a domain bot, else None.
+    Shared with typing_session_start.py, so no main-Kai typing task opens for it. Never raises."""
+    try:
+        tag = direct_bot_tag(attrs, content)
+        if tag:
+            return ("direct_bot_tag", tag)
+        owner = bot_reply_owner(attrs)
+        if owner:
+            return ("reply_to_bot", owner)
+    except Exception:
+        pass
+    return None
 BOT_HANDOFF_LOG = "D:/Kai/tmp/bot_handoffs.json"
 BOT_HANDOFF_MAX_PER_HOUR = 6   # all domain bots together; beyond it a bot tag is ignored (loop guard)
 
@@ -277,6 +322,12 @@ def handle(prompt, dry_run=False):
                 continue
             handoff_tag = (f" FROM_BOT={from_bot} BOT_HANDOFF=1 (a request FROM a domain bot, not from Omer:"
                            " listener.md Step G, bot handoff)")
+        tagged = None if from_bot else direct_bot_tag(attrs, content)
+        if tagged:
+            lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=NONE reason=direct_bot_tag BOT={tagged}"
+                         f" (Omer tagged {tagged} directly; that bot receives it itself: do NOTHING, no"
+                         " reply, no ACK, no tag)")
+            continue
         owner = None if from_bot else bot_reply_owner(attrs)
         if owner:
             lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=NONE reason=reply_to_bot BOT={owner}"

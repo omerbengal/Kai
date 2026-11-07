@@ -103,6 +103,12 @@ def main():
         chans = auto_ack.parse_channels(prompt)
         if chans:
             ack_key = auto_ack.registry_key(chans[0][0])
+        # A General message a domain bot owns (Omer @mentioned it / replied to it): the bot types for it,
+        # main opens no typing task (07/11/2026, Omer msg 925).
+        owned = [auto_ack.bot_owned(a, c) for a, c in chans]
+        if chans and all(owned):
+            _tlog("start-skip", "bot-owned " + ",".join(f"{r}:{b}" for r, b in owned))
+            return
     except Exception:
         pass
     _, thread = target({"chat_id": chat_id, "message_thread_id": attr("message_thread_id")})

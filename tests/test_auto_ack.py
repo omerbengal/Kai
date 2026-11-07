@@ -229,3 +229,86 @@ def test_bot_handoff_rate_limit(tmp_path):
 def test_omer_is_never_a_bot_sender():
     attrs = auto_ack.parse_channels(ch("x", chat_id=GEN, user_id="${KAI_TELEGRAM_CHAT_ID}"))[0][0]
     assert auto_ack.bot_sender(attrs) is None
+
+
+# --- Omer tagging a domain bot directly in General (07/11/2026, Omer msgs 916 / 921 / 925) --------------------
+def _no_live(monkeypatch, tmp_path, owner=None):
+    monkeypatch.setattr(auto_ack, "REGISTRY_DIR", str(tmp_path))
+    monkeypatch.setattr(auto_ack, "open_bot_questions", lambda: [])
+    monkeypatch.setattr(auto_ack, "bot_reply_owner", lambda attrs: owner)
+    sent = []
+    monkeypatch.setattr(auto_ack, "send_ack",
+                        lambda text, reply_to, chat_id=None: sent.append((text, reply_to)) or 88)
+    return sent
+
+
+def test_usernames_come_from_bots_config():
+    names = auto_ack._bot_usernames()
+    assert names.get("kai__miluim_bot") == "miluim"
+    assert names.get("kai__whatsapp_bot") == "whatsapp"
+
+
+def test_direct_bot_tag_sends_no_ack(tmp_path, monkeypatch):
+    sent = _no_live(monkeypatch, tmp_path)
+    out = auto_ack.handle(ch("@kai__miluim_bot תבדוק את הרישום", chat_id=GEN, message_id="916"))
+    assert sent == []
+    assert "AUTO_ACK_MSG_ID=NONE reason=direct_bot_tag BOT=miluim" in out[0] and "do NOTHING" in out[0]
+
+
+def test_direct_bot_tag_mid_text_any_case(tmp_path, monkeypatch):
+    sent = _no_live(monkeypatch, tmp_path)
+    out = auto_ack.handle(ch("תעשה לי טובה @Kai__WhatsApp_Bot, תשלח ל<contact>", chat_id=GEN, message_id="917"))
+    assert sent == [] and "BOT=whatsapp" in out[0]
+
+
+def test_no_tag_still_gets_ack(tmp_path, monkeypatch):
+    sent = _no_live(monkeypatch, tmp_path)
+    out = auto_ack.handle(ch("תבדוק את הלוז שלי", chat_id=GEN, message_id="918"))
+    assert sent == [("🔄 ⏳", "918")] and "AUTO_ACK_MSG_ID=88" in out[0]
+
+
+def test_bot_tag_in_private_chat_is_not_bot_owned():
+    attrs, content = auto_ack.parse_channels(ch("@kai__miluim_bot משהו"))[0]
+    assert auto_ack.direct_bot_tag(attrs, content) is None
+
+
+def test_partial_username_or_email_is_not_a_tag():
+    attrs, _ = auto_ack.parse_channels(ch("x", chat_id=GEN))[0]
+    u = {"kai__miluim_bot": "miluim"}
+    assert auto_ack.direct_bot_tag(attrs, "@kai__miluim_bot_old", u) is None
+    assert auto_ack.direct_bot_tag(attrs, "a@kai__miluim_bot", u) is None
+
+
+def test_main_tagged_too_keeps_ack(tmp_path, monkeypatch):
+    sent = _no_live(monkeypatch, tmp_path)
+    auto_ack.handle(ch(f"@{auto_ack.MAIN_USERNAME} @kai__miluim_bot תתאמו", chat_id=GEN, message_id="919"))
+    assert sent == [("🔄 ⏳", "919")]
+
+
+def test_reply_to_bot_unchanged(tmp_path, monkeypatch):
+    sent = _no_live(monkeypatch, tmp_path, owner="trading")
+    out = auto_ack.handle(ch("כן", chat_id=GEN, message_id="920", reply_to_message_id="900"))
+    assert sent == [] and "reason=reply_to_bot BOT=trading" in out[0]
+
+
+def test_bot_owned_helper_for_typing_hook(monkeypatch):
+    monkeypatch.setattr(auto_ack, "bot_reply_owner", lambda attrs: None)
+    a, c = auto_ack.parse_channels(ch("@kai__invest_bot מה עם NVDA", chat_id=GEN))[0]
+    assert auto_ack.bot_owned(a, c) == ("direct_bot_tag", "trading")
+    a, c = auto_ack.parse_channels(ch("מה עם NVDA", chat_id=GEN))[0]
+    assert auto_ack.bot_owned(a, c) is None
+
+
+def test_typing_hook_opens_no_lease_for_bot_tag(monkeypatch):
+    import io
+    import typing_lease
+    import typing_session_start
+    opened = []
+    monkeypatch.setattr(typing_lease, "open_lease", lambda *a, **k: opened.append((a, k)))
+    monkeypatch.setattr(typing_session_start, "_tlog", lambda *a: None)
+    monkeypatch.setattr(auto_ack, "bot_reply_owner", lambda attrs: None)
+    for text, expect in (("@kai__miluim_bot תבדוק", 0), ("תבדוק את הלוז", 1)):
+        opened.clear()
+        monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"prompt": ch(text, chat_id=GEN)})))
+        typing_session_start.main()
+        assert len(opened) == expect, text
