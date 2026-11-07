@@ -43,12 +43,13 @@ row. This section replaces Step −2 / Step shortening for these messages:
    question message to `‏✅ הועבר`.
 3. **Personal / general** (not a bot's domain): Options A/B/C/C2 answer inline in General (`reply` with the
    group chat_id, `reply_to`, no thread). Anything bigger → the worker path with the ACK IN General:
-   `dispatch_start.py --chat_id <group-id> --ack_id <AUTO_ACK_MSG_ID> --title "<summary>"` (on `FAILED` /
-   no AUTO_ACK line: `--reply_to <message_id>` instead of `--ack_id`; **no `--pin`**: tg_pin is private-only,
-   and the script writes no messages / ack_log row for the group), then the worker with `NOTES: CHAT_ID=<group-id> (General topic): every
-   reply / edit_message uses this chat_id and no message_thread_id; skip tg_pin and log_ack; delete the ACK
-   with deleteMessage on this chat_id and do NOT delete its messages row (group ids collide with private
-   ones)`. **No fast script (Option D) from General**: they answer in the private chat only; the worker does
+   `dispatch_start.py --chat_id <group-id> --ack_id <AUTO_ACK_MSG_ID> --title "<summary>" --pin` (on `FAILED` /
+   no AUTO_ACK line: `--reply_to <message_id>` instead of `--ack_id`; `--pin` pins it in General since 07/11/2026,
+   tg_pin is per chat; the script writes no messages / ack_log row for the group), then the worker with `NOTES: CHAT_ID=<group-id> (General topic): every
+   reply / edit_message uses this chat_id and no message_thread_id; skip log_ack; before deleting the ACK unpin it
+   with tg_pin.py unpin ACK_MSG_ID --chat_id <group-id>, then deleteMessage on this chat_id and do NOT delete
+   its messages row (group ids collide with private ones)`, and `dispatch_map.py <agentId> ACK ORIG <group-id>`
+   (the chat_id makes the finish handler unpin/delete in the group, never the private message with that id). **No fast script (Option D) from General**: they answer in the private chat only; the worker does
    the DB operation itself. Reminders still fire in the private chat; say so when setting one.
 4. **"מה הבוט עשה?" / anything about a bot's work** (in General OR the private chat): read it, never guess -
    `python D:/Kai/scripts/general_handoff.py history --bot <name> [--n 40]` prints the bot's recent
@@ -788,24 +789,28 @@ try:
     if isinstance(entry, dict):
         ack_msg_id = entry.get('ack_id')
         orig_id = entry.get('orig_id')
+        ack_chat = entry.get('chat_id', '${KAI_TELEGRAM_CHAT_ID}')  # group ACK (07/11/2026): never the private id twin
     else:
         ack_msg_id = entry
         orig_id = None
+        ack_chat = '${KAI_TELEGRAM_CHAT_ID}'
     if ack_msg_id:
         # Unpin first so the pinned banner never sticks on a dead task
         try:
             sys.path.insert(0, 'D:/Kai/scripts')
             from tg_pin import unpin_ack
-            unpin_ack(ack_msg_id)
+            unpin_ack(ack_msg_id, ack_chat)
         except Exception: pass
         # Try to delete ACK — silent if already deleted by worker
         try:
             urllib.request.urlopen(
-                f'https://api.telegram.org/bot${KAI_TELEGRAM_BOT_TOKEN}/deleteMessage?chat_id=${KAI_TELEGRAM_CHAT_ID}&message_id={ack_msg_id}',
+                f'https://api.telegram.org/bot${KAI_TELEGRAM_BOT_TOKEN}/deleteMessage?chat_id={ack_chat}&message_id={ack_msg_id}',
                 timeout=5
             )
         except Exception: pass
         try:
+            if ack_chat != '${KAI_TELEGRAM_CHAT_ID}':
+                raise RuntimeError('group ACK has no messages row')
             conn = sqlite3.connect('D:/Kai/kai.db')
             conn.execute('DELETE FROM messages WHERE telegram_message_id = ?', (int(ack_msg_id),))
             conn.commit()

@@ -93,7 +93,9 @@ request, one atomic fact per note. Other bots read them only (resolve_name.py).
 2. A one-step question you can answer from one read (a DB row, a file) → do it inline and reply.
 3. Anything multi-step → the ACK is ALREADY in the topic: the `auto-ack` hook sent a silent `🔄 ⏳` before
    you started and gave you `AUTO_ACK_MSG_ID=<id>`. Edit THAT message to `🔄 <one-line title> — ⏳ מתחיל...`
-   (never a second ACK; only on `FAILED` / no line send it yourself with `reply`), then spawn
+   (never a second ACK; only on `FAILED` / no line send it yourself with `reply`), pin it in the same block
+   (`python D:/Kai/bots/bot_tg.py pin --bot whatsapp --chat <chat_id> --msg <ACK id>`, silent, 07/11/2026: the live
+   status stays in the pinned banner; every `bot_tg.py delete` unpins first), then spawn
    `Agent(subagent_type="whatsapp-worker", run_in_background=true)` with this block, and stop:
    ```
    CHAT_ID: <chat_id>
