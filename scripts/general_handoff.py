@@ -11,6 +11,9 @@ CLI (main Kai's dispatcher only):
   general_handoff.py tag --bot trading --reply-to <Omer's General msg id> --text "<the request>"
         prints `TAGGED <msg id>` or `DOWN <msg id>` (bot not running: a short notice instead of a tag)
   general_handoff.py history --bot trading [--n 20]           the bot's recent messages (its own bot.db)
+  general_handoff.py answer --bot whatsapp --question <bot's General question msg id> --text "<Omer's answer>"
+        Omer answered a bot's open General question with a plain message (no reply): main tags the bot as a
+        reply to its question, so the bot reopens THAT task (07/11/2026, Omer msg 781). Prints TAGGED / DOWN.
 """
 import io
 import json
@@ -102,6 +105,10 @@ def main(argv):
         return 0
     if cmd == "history":
         print(history(_arg(argv, "--bot"), int(_arg(argv, "--n", 20))))
+        return 0
+    if cmd == "answer":
+        st, mid = handoff(_arg(argv, "--bot"), _arg(argv, "--text", ""), _arg(argv, "--question"))
+        print(f"{st.upper()} {mid}")
         return 0
     if cmd == "tag":
         st, mid = handoff(_arg(argv, "--bot"), _arg(argv, "--text", ""), _arg(argv, "--reply-to"))

@@ -55,7 +55,20 @@ row. This section replaces Step −2 / Step shortening for these messages:
    `python D:/Kai/scripts/general_handoff.py history --bot <name> [--n 40]` prints the bot's recent
    messages from its own `bot.db` (every reply, question and summary it sent, and what Omer wrote it).
    Main Kai never receives the bots' Telegram messages as prompts (no loop, no extra turns; Omer msg 22595).
-5. **Never** tag a bot for a message that came from a bot, never answer in a bot's topic, never post
+5. **Omer answering a bot in General (07/11/2026, Omer msgs 781 / 791).** A bot that is stuck / failed /
+   unsure / needs a decision asks Omer IN General, tagging him (`bot_tg.py general-ask`), and a buttons
+   question it leaves in its topic is nudged in General after 2 min unanswered. His answer is the bot's, never
+   main's:
+   - `AUTO_ACK ... reason=reply_to_bot BOT=<name>` = he replied to that bot's General message (question,
+     nudge, summary line). Telegram delivers it to that bot itself: do NOTHING (no ACK was sent, no reply, no
+     tag, no reaction).
+   - `OPEN_BOT_QUESTION bot=<name> question_msg=<id> text="..."` lines = questions a bot has open for him in
+     General. If his plain message (not a reply) answers one of them, ONE call:
+     `python D:/Kai/scripts/general_handoff.py answer --bot <name> --question <question_msg> --text "<his
+     answer as he wrote it, plus any context the bot needs>"` (tags the bot as a reply to its question, so it
+     reopens THAT task), and delete the ACK in the same block. Two open questions and his words fit both = ONE
+     question in General with a button per bot (principle 6). A new request = the normal Step G paths.
+6. **Never** tag a bot for a message that came from a bot, never answer in a bot's topic, never post
    "העברתי ל..." lines. The private chat keeps working as before.
 
 ---

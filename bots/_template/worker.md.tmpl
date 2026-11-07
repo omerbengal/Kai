@@ -21,6 +21,9 @@ domain map and the WhatsApp rules (General tag).
   right above them. Never open a message with the bot's own name. Run the 3-question check before the final reply.
 - **Finish (and on error), in ONE parallel block:** the final `reply`, and
   `python D:/Kai/bots/bot_tg.py delete --bot {{BOT}} --chat CHAT_ID --msg ACK_MSG_ID`.
+- **Any task, also outside General:** a problem or a question for Omer goes to General with him tagged
+  (`general-ask`, without `--tag-msg`); a buttons question you leave in THREAD_ID is nudged in General by
+  the code after 2 minutes unanswered.
 - **A General task** (the block has `GENERAL_TAG_MSG_ID`, `ORIGINAL_MSG_ID: NONE`): main Kai tagged the bot in
   the group's General topic. Everything happens in THREAD_ID (the bot's own topic) with no `reply_to`, except
   the detailed final `reply`: `message_thread_id=THREAD_ID` + `reply_to=GENERAL_TAG_MSG_ID`, so it quotes the
@@ -29,16 +32,22 @@ domain map and the WhatsApp rules (General tag).
   GENERAL_TAG_MSG_ID --summary "<ONE short line, max 15 words>" --detail-msg <the detailed reply's id>`
   (`--fail` on failure). That swaps 👀 for 👍 / 👎 and posts the short line in General (Omer: "ממש קצרה").
   A refused summary (exit 2) = shorten it to one line and rerun.
-  **Stopping to ask Omer is NOT the end** (a question, a proposal, approve buttons): send it in THREAD_ID,
-  delete the ACK, then `python D:/Kai/bots/bot_tg.py general-wait --bot {{BOT}} --chat CHAT_ID --tag-msg
-  GENERAL_TAG_MSG_ID --question-msg <the question's id>` (🤔, nothing in General), never general-done.
+  **Stopping to ask Omer is NOT the end.** Stopped / failed / unsure / blocked / a short decision: ONE short
+  message in General that tags him, `python D:/Kai/bots/bot_tg.py general-ask --bot {{BOT}} --text "<issue +
+  question, max 3 lines>" --tag-msg GENERAL_TAG_MSG_ID [--buttons '<JSON>'] [--detail-msg <detail id in
+  THREAD_ID>]`, then delete the ACK (Omer 07/11/2026: "זה חייב להיות שיח ב-General"). Only a question that
+  needs the detail on screen (a draft, a multi-option choice) goes in THREAD_ID with buttons, then
+  `bot_tg.py general-wait --bot {{BOT}} --chat CHAT_ID --tag-msg GENERAL_TAG_MSG_ID --question-msg <its id>`
+  (🤔; the code nudges him in General after 2 min unanswered). Never general-done while waiting.
   general-done only when the work is really finished; after his answer the tag is 👀 again and the
   follow-up worker (same GENERAL_TAG_MSG_ID) closes it. A tag from main Kai never approves an
   outward send: that still needs Omer's own button.
 - **Another bot's domain** (WhatsApp = the WhatsApp bot, reading or sending): ask it visibly in General,
   `python D:/Kai/bots/bot_tg.py ask --bot {{BOT}} --to <bot> --text "<self-contained request>"
   [--origin-tag GENERAL_TAG_MSG_ID]`; it waits and prints the answer (JSON). `status: waiting` = run
-  `bot_tg.py ask-wait --bot {{BOT}} --id <request_msg>` once, then tell Omer it is pending; never ask twice. A
+  `bot_tg.py ask-wait --bot {{BOT}} --id <request_msg>` once; still waiting = the other bot is asking Omer in
+  General itself (it tags him there): send NOTHING about it, never explain its question or send Omer to its
+  topic, never ask twice; its answer arrives later as BOT_ANSWER and the session finishes the task. A
   send is approved only by Omer's button in that bot's topic. Edit the ACK first ("💬 שואל את קאי וואטסאפ...").
 - **Never** use the main Kai scripts that send with the main token (`dispatch_start.py`, `tg_silent_send.py`,
   `tg_pin.py`, `log_ack.py`, `scripts/fast/*`). Never touch the typing indicator.

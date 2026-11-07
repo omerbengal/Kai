@@ -29,6 +29,11 @@ CLI:
                                                      ask another bot by tagging it in General; waits for its
                                                      reply there and prints it (JSON). Bot-to-bot, 06/11/2026
   bot_tg.py ask-wait --bot miluim --id <request msg> [--timeout 420]   keep waiting for that answer
+  bot_tg.py general-ask --bot miluim [--chat C] --text "..." [--tag-msg M] [--buttons JSON] [--detail-msg D]
+                                                     unsure / stopped / failed / a decision: ONE short message in
+                                                     General that tags Omer (07/11/2026); he answers there
+  bot_tg.py nudge-due --bot miluim [--sleep S]       "waiting for your answer" in General for topic questions
+                                                     unanswered after 2 min (timer + main heartbeat)
   bot_tg.py general-wait --bot miluim --chat C --tag-msg M [--question-msg Q]
                                                      stopped to ask Omer: 🤔 on the tag, no General line; his
                                                      answer in the topic reopens it (👀, GENERAL_PENDING_TAG)
@@ -149,6 +154,11 @@ def hook_save(bot, mode, data, db_path=DB_PATH):
                  ti.get("text", "") if i == 0 else f"[part {i + 1}]", None, None, db_path)
         if db_path is None:  # tests pass their own db: no registry, no Telegram calls
             _buttons("on_outgoing", ti, json.dumps(data.get("tool_response", {})), bot)
+            if ti.get("inline_keyboard") and ti.get("message_thread_id") and ids[-1]:
+                try:  # a question with buttons in the topic: "waiting for you" in General after 2 min
+                    schedule_nudge(bot, ti.get("chat_id"), ti.get("message_thread_id"), ids[-1], ti.get("text", ""))
+                except Exception as e:
+                    print(f"[bot_tg] nudge schedule failed: {e}", file=sys.stderr)
     if mode == "incoming" and db_path is None:
         _buttons("on_incoming", data.get("prompt", "") or data.get("content", ""), bot)
 
@@ -207,9 +217,14 @@ def migrate(bot, src=KAI_DB):
     return len(rows), total
 
 
-def send(bot, chat, text, thread=None, reply_to=None, silent=False, timeout=15):
-    """Plain sendMessage with this bot's token (handoff posts, auto-ACK). Saves the outgoing row."""
+def send(bot, chat, text, thread=None, reply_to=None, silent=False, timeout=15, entities=None, keyboard=None):
+    """Plain sendMessage with this bot's token (handoff posts, auto-ACK). Saves the outgoing row.
+    entities: Telegram MessageEntity list (the text_mention of Omer); keyboard: inline_keyboard rows."""
     payload = {"chat_id": chat, "text": text}
+    if entities:
+        payload["entities"] = entities
+    if keyboard:
+        payload["reply_markup"] = {"inline_keyboard": keyboard}
     if thread:
         payload["message_thread_id"] = int(thread)
     if reply_to:
@@ -253,6 +268,14 @@ ASK_DEFAULT_WAIT = 420          # one Bash call is capped at 10 min
 DEPTH_HOURS = 1                 # a bot tag still open this recently blocks asking (depth 1)
 BOT_ANSWER_MAX_LINES = 10
 BOT_ANSWER_MAX_CHARS = 700
+# Questions and problems go to General with Omer tagged (07/11/2026, Omer msgs 781 / 791): Omer has no
+# @username, so the only way to notify him is a text_mention entity on his name.
+OMER_NAME = "עומר"
+RLM = "\u200f"
+ASK_OMER_MAX_LINES = 3
+ASK_OMER_MAX_CHARS = 350
+NUDGE_AFTER_S = 120             # a topic question unanswered this long gets a "waiting" line in General
+NUDGE_MAX_AGE_S = 6 * 3600      # never nudge a question older than this (a missed heartbeat, a restart)
 
 
 def ack_classify(bot, attrs, content):
@@ -341,7 +364,291 @@ def general_done(bot, chat, tag_msg, summary, ok=True, detail_msg=None, sender=N
     text = "‏" + s
     if detail_msg:
         text += "\n‏" + topic_link(kai_bots.bot(bot).get("group_id"), own_topic(bot), detail_msg)
-    return sender(bot, chat, text, thread=None, reply_to=tag_msg)
+    if ok:
+        line = sender(bot, chat, text, thread=None, reply_to=tag_msg)
+    else:
+        # a failure is a problem for Omer: he is tagged on a last line (07/11/2026, Omer msg 781). The tag is
+        # at the END so a bot waiting on this answer never mistakes it for a question to Omer (asks_omer).
+        text += "\n" + RLM
+        ents = [mention_entity(_u16(text))]
+        text += OMER_NAME + " ☝🏻"
+        line = sender(bot, chat, text, thread=None, reply_to=tag_msg, entities=ents)
+    try:
+        _set_tag(bot, tag_msg, line=str(line))
+    except Exception:
+        pass
+    return line
+
+
+# --- Omer is asked in General, tagged (07/11/2026, Omer msgs 781 / 791) -------------------------------------
+# A bot that is unsure / stopped / failed / needs a decision writes ONE short message in General that tags Omer
+# (`general-ask`); he answers there (reply, button or plain message routed by main Kai) and the answer reaches
+# the bot. A question that needs the detail (a draft, a choice with buttons) may stay in the bot's topic, but
+# if Omer has not answered it within NUDGE_AFTER_S, a "waiting for you" line with a link is posted in General
+# (`nudge_due`, run by a detached timer from the hook and by main Kai's heartbeat every minute).
+
+def _u16(s):
+    return len((s or "").encode("utf-16-le")) // 2
+
+
+def mention_entity(offset):
+    return {"type": "text_mention", "offset": offset, "length": _u16(OMER_NAME), "user": {"id": int(OMER_ID)}}
+
+
+def omer_text(after):
+    """'‏עומר, <after>' + the text_mention entity that notifies him."""
+    return f"{RLM}{OMER_NAME}, {after}", [mention_entity(_u16(RLM))]
+
+
+ASKS_OMER_RE = re.compile(r"^[\s‏‎]*" + OMER_NAME + r"\s*,")
+
+
+def asks_omer(text):
+    """A General message that opens with Omer's name = a question / problem addressed to him."""
+    return bool(ASKS_OMER_RE.match(text or ""))
+
+
+def _register_buttons(chat, mid, text, keyboard, bot):
+    try:
+        import button_registry
+        button_registry.register(chat, mid, text, keyboard, bot, None, "general_ask")
+    except Exception as e:
+        print(f"[bot_tg] buttons register failed: {e}", file=sys.stderr)
+
+
+def general_ask(bot, chat, text, tag_msg=None, keyboard=None, detail_msg=None, sender=None, reactor=None,
+                deleter=None, registrar=None):
+    """Post a short question / problem in General, tagging Omer. With a tag (a General task) it is a reply to
+    the tag and the tag waits (🤔); without one the question itself is tracked. Returns the message id."""
+    sender, reactor = sender or send, reactor or react
+    registrar = registrar or _register_buttons
+    lines_ = [ln.strip().lstrip(RLM).strip() for ln in (text or "").splitlines() if ln.strip()]
+    if lines_ and lines_[0].startswith(OMER_NAME):
+        lines_[0] = lines_[0][len(OMER_NAME):].lstrip(" ,:")
+    lines_ = [ln for ln in lines_ if ln]
+    body_txt = ("\n" + RLM).join(lines_)
+    if not body_txt or len(lines_) > ASK_OMER_MAX_LINES or len(body_txt) > ASK_OMER_MAX_CHARS:
+        raise ValueError(f"a General question is <= {ASK_OMER_MAX_LINES} lines / {ASK_OMER_MAX_CHARS} chars: the"
+                         " issue in short; the details go in your topic (--detail-msg links them)")
+    body, ents = omer_text(body_txt)
+    if detail_msg:
+        body += "\n" + RLM + topic_link(kai_bots.bot(bot).get("group_id"), own_topic(bot), detail_msg)
+    mid = sender(bot, chat, body, thread=None, reply_to=tag_msg, entities=ents, keyboard=keyboard or None)
+    if keyboard:
+        registrar(chat, mid, body, keyboard, bot)
+    key = str(tag_msg) if tag_msg else str(mid)
+    if tag_msg:
+        try:
+            reactor(bot, chat, tag_msg, WAITING)
+        except Exception:
+            pass
+    _set_tag(bot, key, chat=chat, state="waiting", question=str(mid), where="general", qtext=lines_[0][:120])
+    close_tag_ack(bot, chat, key, deleter)
+    return mid
+
+
+def general_answer_hit(bot, attrs):
+    """Omer (or main Kai forwarding his answer) answers in General a question of this bot: a reply to / a
+    button on the General question, the done line or the nudge. Returns the tracked tag key, or None."""
+    target = attrs.get("message_id") if "callback_data" in attrs else attrs.get("reply_to_message_id")
+    if not target:
+        return None
+    now = datetime.now(timezone.utc).timestamp()
+    for k, v in load_tags(bot).items():
+        if now - v.get("ts", 0) > REOPEN_HOURS * 3600:
+            continue
+        if str(target) in (v.get("question"), v.get("line"), v.get("nudge")):
+            return k
+    return None
+
+
+def nudge_for(bot, msg):
+    """The topic question a General nudge message points at (a reply to the nudge = its answer)."""
+    if not msg:
+        return None, None
+    for q, e in load_nudges(bot).items():
+        if e.get("nudge_msg") == str(msg):
+            return q, e
+    return None, None
+
+
+def _nudges_path(bot):
+    return os.path.join(kai_bots.bot(bot)["home"], "tmp", "question_nudges.json")
+
+
+def load_nudges(bot):
+    try:
+        with open(_nudges_path(bot), encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_nudges(bot, d):
+    p = _nudges_path(bot)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    cutoff = datetime.now(timezone.utc).timestamp() - 3 * 86400
+    d = {k: v for k, v in d.items() if v.get("ts", cutoff + 1) > cutoff}
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False)
+    os.replace(tmp, p)
+
+
+def _spawn_nudge_timer(bot):
+    """A detached `nudge-due` that sleeps past the deadline (the bot_typing.py spawn pattern). Never raises;
+    main Kai's heartbeat runs nudge_due every minute anyway."""
+    try:
+        import subprocess
+        subprocess.Popen(
+            [sys.executable, os.path.abspath(__file__), "nudge-due", "--bot", bot, "--sleep", str(NUDGE_AFTER_S + 3)],
+            creationflags=0x00000008 | 0x00000200 | 0x08000000, close_fds=True,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
+
+
+def schedule_nudge(bot, chat, thread, qmsg, text, now=None, spawn=True):
+    """A question to Omer in the bot's own topic (buttons, or general-wait): nudge in General if unanswered."""
+    if not chat or not thread or not qmsg or str(chat) != str(kai_bots.bot(bot).get("group_id")):
+        return False
+    now = now or datetime.now(timezone.utc).timestamp()
+    d = load_nudges(bot)
+    if str(qmsg) in d:
+        return False
+    first = next((ln.strip().lstrip(RLM).strip() for ln in (text or "").splitlines() if ln.strip()), "")
+    d[str(qmsg)] = {"chat": str(chat), "thread": str(thread), "due": now + NUDGE_AFTER_S, "ts": now,
+                    "state": "pending", "text": first[:90]}
+    _save_nudges(bot, d)
+    if spawn:
+        _spawn_nudge_timer(bot)
+    return True
+
+
+def question_answered(bot, q, e, db_path=DB_PATH):
+    """Omer already answered: the buttons were closed, he wrote in the topic after it, or its General tag is
+    no longer waiting."""
+    try:
+        import button_registry
+        b = button_registry.get(e["chat"], q, bot)
+        if b and b.get("status") != "open":
+            return True
+    except Exception:
+        pass
+    for v in load_tags(bot).values():
+        if v.get("question") == str(q) and v.get("state") != "waiting":
+            return True
+    try:
+        conn = _conn(db_path, bot)
+        n = conn.execute("SELECT COUNT(*) FROM bot_messages WHERE bot=? AND direction='incoming' AND chat_id=?"
+                         " AND thread_id=? AND telegram_message_id>?",
+                         (bot, e["chat"], e["thread"], int(q))).fetchone()[0]
+        conn.close()
+        if n:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _claim_nudge(bot, q):
+    d = os.path.join(kai_bots.bot(bot)["home"], "tmp", "nudge_claims")
+    os.makedirs(d, exist_ok=True)
+    try:
+        os.close(os.open(os.path.join(d, f"{q}.claim"), os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        return True
+    except FileExistsError:
+        return False
+
+
+def nudge_due(bot, now=None, sender=None, answered=None, claim=None):
+    """Post the "waiting for your answer" line in General for every due, still unanswered topic question."""
+    sender = sender or send
+    answered = answered or question_answered
+    claim = claim or _claim_nudge
+    now = now or datetime.now(timezone.utc).timestamp()
+    sent = []
+    for q, e in sorted(load_nudges(bot).items()):
+        if e.get("state") != "pending" or e.get("due", 0) > now:
+            continue
+        if now - e.get("ts", now) > NUDGE_MAX_AGE_S or answered(bot, q, e):
+            d = load_nudges(bot)
+            d.setdefault(q, e)["state"] = "cancelled"
+            _save_nudges(bot, d)
+            continue
+        if not claim(bot, q):
+            continue
+        tag = next((k for k, v in load_tags(bot).items()
+                    if v.get("question") == str(q) and v.get("state") == "waiting"), None)
+        after = "מחכה לתשובה שלך בנושא שלי ⏳"
+        if e.get("text"):
+            after += "\n" + RLM + e["text"]
+        body, ents = omer_text(after)
+        body += "\n" + RLM + topic_link(e["chat"], e["thread"], q)
+        try:
+            mid = sender(bot, e["chat"], body, thread=None, reply_to=tag, entities=ents)
+        except Exception as ex:
+            print(f"[bot_tg] nudge {q} failed: {ex}", file=sys.stderr)
+            continue
+        d = load_nudges(bot)
+        d.setdefault(q, e).update({"state": "sent", "nudge_msg": str(mid)})
+        _save_nudges(bot, d)
+        if tag:
+            try:
+                _set_tag(bot, tag, nudge=str(mid), qtext=e.get("text", ""))
+            except Exception:
+                pass
+        sent.append((q, mid))
+    return sent
+
+
+def general_owner(chat, msg, bots=None):
+    """Which domain bot sent General message `msg` (main Kai's auto-ACK: Omer replying to a bot's message is
+    that bot's, never main's). Reads each bot's own bot.db; None when no bot sent it."""
+    if not msg:
+        return None
+    try:
+        bots = bots if bots is not None else all_bots()
+    except Exception:
+        return None
+    for name in bots:
+        try:
+            conn = sqlite3.connect(db_for(name), timeout=1)
+            row = conn.execute("SELECT 1 FROM bot_messages WHERE direction='outgoing' AND chat_id=? AND"
+                               " (thread_id IS NULL OR thread_id='') AND telegram_message_id=? LIMIT 1",
+                               (str(chat), int(msg))).fetchone()
+            conn.close()
+            if row:
+                return name
+        except Exception:
+            continue
+    return None
+
+
+def open_questions(bots=None, now=None):
+    """[(bot, msg, text)] for every question a bot has open for Omer IN General (general-ask, or a nudge)."""
+    now = now or datetime.now(timezone.utc).timestamp()
+    out = []
+    try:
+        bots = bots if bots is not None else all_bots()
+    except Exception:
+        return out
+    for name in bots:
+        try:
+            for k, v in load_tags(name).items():
+                if v.get("state") == "waiting" and now - v.get("ts", 0) < REOPEN_HOURS * 3600:
+                    if v.get("where") == "general" and v.get("question"):
+                        out.append((name, v["question"], v.get("qtext", "")))
+                    elif v.get("nudge"):
+                        out.append((name, v["nudge"], v.get("qtext", "")))
+            for q, e in load_nudges(name).items():
+                if e.get("state") == "sent" and now - e.get("ts", 0) < REOPEN_HOURS * 3600 and \
+                        not any(o[:2] == (name, e.get("nudge_msg")) for o in out) and \
+                        not question_answered(name, q, e):
+                    out.append((name, e.get("nudge_msg"), e.get("text", "")))
+        except Exception:
+            continue
+    return out
 
 
 # --- General tag states (06/11/2026, Omer msg 22669: 👍 showed while the real work only started) ----------
@@ -463,7 +770,7 @@ def react_tag(bot, chat, msg, emoji, reactor=None, deleter=None):
     return True
 
 
-def general_wait(bot, chat, tag_msg, question_msg=None, reactor=None, deleter=None):
+def general_wait(bot, chat, tag_msg, question_msg=None, reactor=None, deleter=None, schedule=True):
     """The bot stopped to ask Omer (question / proposal / buttons): 🤔 on the tag, NO line in General."""
     reactor = reactor or react
     try:
@@ -472,7 +779,23 @@ def general_wait(bot, chat, tag_msg, question_msg=None, reactor=None, deleter=No
         pass
     _set_tag(bot, tag_msg, chat=chat, state="waiting", question=str(question_msg) if question_msg else None)
     close_tag_ack(bot, chat, tag_msg, deleter)
+    if question_msg and schedule:
+        try:
+            schedule_nudge(bot, chat, own_topic(bot), question_msg, _row_text(bot, chat, question_msg))
+        except Exception:
+            pass
     return "waiting"
+
+
+def _row_text(bot, chat, msg):
+    try:
+        conn = _conn(bot=bot)
+        r = conn.execute("SELECT text FROM bot_messages WHERE bot=? AND chat_id=? AND telegram_message_id=?"
+                         " ORDER BY id DESC LIMIT 1", (bot, str(chat), int(msg))).fetchone()
+        conn.close()
+        return r[0] if r else ""
+    except Exception:
+        return ""
 
 
 def reopen_tag(bot, attrs, reactor=None):
@@ -664,6 +987,13 @@ def bot_inbound(bot, from_bot, attrs, content, reactor=None, dry_run=False):
             if not dry_run:
                 _update_request(bot, rt, details=req.get("details", []) + [{"msg": mid, "text": body[:3000]}])
             return f"{head} reason=bot_detail BOT_ANSWER_DETAIL request={rt} from={from_bot} (stored; do nothing)"
+        if asks_omer(body):
+            # 07/11/2026 (Omer msg 781): the other bot stopped and asked Omer in General; its answer comes later
+            if not dry_run:
+                _update_request(bot, rt, omer_question=mid)
+            return (f"{head} reason=bot_asks_omer BOT_ASKS_OMER request={rt} from={from_bot} (it asked Omer in"
+                    " General about your request: do NOTHING, never repeat the question in your topic; its"
+                    " answer arrives later as BOT_ANSWER)")
         live = _waiter_live(bot, rt)
         if not dry_run:
             _update_request(bot, rt, state="answered", answer=body[:3000], answer_msg=mid)
@@ -730,9 +1060,28 @@ def auto_ack(bot, prompt, dry_run=False, sender=None, reactor=None):
                 continue
         gen = mid != "?" and is_general(bot, attrs)
         tag = f" GENERAL_TAG=1 TAG_MSG_ID={mid} WORK_THREAD_ID={own_topic(bot)}" if gen else ""
+        hit = general_answer_hit(bot, attrs) if gen and not from_bot else None
+        tag_key = hit or mid
+        if hit:
+            # 07/11/2026 (Omer msg 781): his answer in General to this bot's question reopens the ORIGINAL task
+            kind = "ack" if kind == "none" else kind   # "אוקיי" / "כן" answers a question: never trivial here
+            tag = (f" GENERAL_PENDING_TAG={hit} GENERAL_ANSWER_MSG_ID={mid} WORK_THREAD_ID={own_topic(bot)}")
+            if not dry_run:
+                seen_with_retry(bot, attrs.get("chat_id"), mid, reactor)
+                t = load_tags(bot).get(hit, {})
+                if hit != t.get("question"):
+                    try:
+                        reactor(bot, attrs.get("chat_id"), hit, SEEN)
+                    except Exception:
+                        pass
+                _set_tag(bot, hit, state="working")
+        elif gen:
+            nq, ne = nudge_for(bot, attrs.get("reply_to_message_id"))
+            if nq:
+                tag += f" ANSWERS_TOPIC_QUESTION={nq}"
         if gen and from_bot:
             tag += f" FROM_BOT={from_bot}"
-        if gen and not dry_run:
+        if gen and not dry_run and not hit:
             seen_with_retry(bot, attrs.get("chat_id"), mid, reactor)
             if kind != "none":
                 try:
@@ -776,7 +1125,7 @@ def auto_ack(bot, prompt, dry_run=False, sender=None, reactor=None):
                 f.write(str(ack))
             if gen:
                 try:
-                    _set_tag(bot, mid, ack=str(ack))
+                    _set_tag(bot, tag_key, ack=str(ack))
                 except Exception:
                     pass
             _typing("attach_ack", bot, mid, ack)
@@ -837,7 +1186,11 @@ def main(argv):
                   " reply_to=TAG_MSG_ID (it quotes the General tag); stopping to"
                   " ask Omer = bot_tg.py general-wait, NOT general-done."
                   " GENERAL_PENDING_TAG=N = this answers your question on General tag N (now 👀 again):"
-                  " give the worker GENERAL_TAG_MSG_ID: N and close N with general-done only when truly done)\n</system-reminder>")
+                  " give the worker GENERAL_TAG_MSG_ID: N and close N with general-done only when truly done;"
+                  " with GENERAL_ANSWER_MSG_ID=A Omer answered IN General (message A, 👀 on it): work in your"
+                  " topic, the next question goes to General again with general-ask."
+                  " ANSWERS_TOPIC_QUESTION=Q = his General message answers your topic question Q (buttons there:"
+                  " close them with button_registry.py close).)\n</system-reminder>")
         return 0
     if cmd == "send":
         print(send(bot, _arg(argv, "--chat"), _arg(argv, "--text"), _arg(argv, "--thread"),
@@ -869,6 +1222,21 @@ def main(argv):
             print(json.dumps({"error": str(e)}, ensure_ascii=False))
             return 2
         print(json.dumps(out, ensure_ascii=False, indent=1))
+        return 0
+    if cmd == "general-ask":
+        try:
+            kb = _arg(argv, "--buttons")
+            print(general_ask(bot, _arg(argv, "--chat") or kai_bots.bot(bot).get("group_id"), _arg(argv, "--text"),
+                              tag_msg=_arg(argv, "--tag-msg"), keyboard=json.loads(kb) if kb else None,
+                              detail_msg=_arg(argv, "--detail-msg")))
+            return 0
+        except ValueError as e:
+            print(f"[bot_tg] {e}")
+            return 2
+    if cmd == "nudge-due":
+        import time as _t
+        _t.sleep(float(_arg(argv, "--sleep", 0)))
+        print(nudge_due(bot))
         return 0
     if cmd == "general-wait":
         print(general_wait(bot, _arg(argv, "--chat"), _arg(argv, "--tag-msg"), _arg(argv, "--question-msg")))

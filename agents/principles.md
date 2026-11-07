@@ -96,6 +96,11 @@ Any "no" → fix before sending. If Omer corrected you twice in a row on anythin
 - Why: silence looks like failure; he cannot see the terminal.
 - Edit the ACK before each step; the last action is always a `reply`; no silent file edits ("✅ what changed").
 - A status line states what is really happening now, never what the routine path would be doing, and claims only what was checked: "מייצר agent" while the message waits in a busy agent's queue is a false status, and so is "בתור אצל ה-agent שכבר עובד" when that agent had finished. If only a tool's result shows the state, the status is written after that result.
+- A bot that needs Omer (stuck, failed, unsure, blocked, a decision) - also when another bot tagged it -
+  tells him in the bots group's General, tagging him, and he answers there; topics are for detail and
+  bot-to-bot talk. A buttons question left in a topic gets a "waiting" line in General after 2 min (code, not
+  a prompt wish). 07/11: the WhatsApp bot refused the trading bot's request for a trading-community chat in its own topic, and the
+  trading bot sent Omer there to approve; Omer: "זה חייב להיות שיח ב-General".
 - Finishing work a reminder/task tracked → offer (buttons) to mark it done.
 - Money or anything else at risk right now: warnings before the bad event ("מתקרב לסטופ") are the core of the
   watch, never "chatter" to trim; "less noise" removes repeats, not early warnings.

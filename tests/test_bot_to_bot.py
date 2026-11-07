@@ -44,8 +44,8 @@ class Rec:
     def __init__(self):
         self.sends, self.reacts = [], []
 
-    def send(self, bot, chat, text, thread=None, reply_to=None, silent=False, timeout=15):
-        self.sends.append({"bot": bot, "chat": chat, "text": text, "thread": thread, "reply_to": reply_to})
+    def send(self, bot, chat, text, thread=None, reply_to=None, silent=False, timeout=15, **kw):
+        self.sends.append({"bot": bot, "chat": chat, "text": text, "thread": thread, "reply_to": reply_to, **kw})
         return 900 + len(self.sends)
 
     def react(self, bot, chat, msg, emoji, *a, **k):

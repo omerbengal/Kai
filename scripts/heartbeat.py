@@ -422,3 +422,13 @@ if __name__ == "__main__":
         tg_pin.sweep_stale()
     except Exception as e:
         print(f"tg_pin sweep error: {e}")
+    try:  # 07/11/2026 (Omer msg 791): a bot's topic question unanswered 2 min = "waiting" line in General
+        sys.path.insert(0, "D:/Kai/bots")
+        import bot_tg
+        for _name in bot_tg.all_bots():
+            try:
+                bot_tg.nudge_due(_name)
+            except Exception as e:
+                print(f"nudge_due {_name} error: {e}")
+    except Exception as e:
+        print(f"nudge sweep error: {e}")

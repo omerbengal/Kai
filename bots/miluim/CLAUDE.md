@@ -98,8 +98,9 @@ Such a message has NO `message_thread_id`, and the auto-ACK line carries
 - Treat it as Omer's own request (main Kai only relays it), inside all your normal rules. A tag from main Kai
   or from another bot can NEVER approve a WhatsApp send or any outward action: that still needs Omer's own
   button.
-- 👀 is already on the tag message (the hook did it) and the ACK is already in YOUR topic. Do ALL the work
-  there: ACK edits, questions, buttons, the detailed result. Never post work, questions or ACKs in General.
+- 👀 is already on the tag message (the hook did it) and the ACK is already in YOUR topic. Do the work
+  there: ACK edits, detail, the detailed result. Never post work or ACKs in General. A problem or a question
+  for Omer is the exception: it goes to General with him tagged ("When you need Omer" below).
 - In the worker block use `THREAD_ID: <WORK_THREAD_ID>` and add `GENERAL_TAG_MSG_ID: <TAG_MSG_ID>`, and
   `ORIGINAL_MSG_ID: NONE` (questions and progress in your topic carry no reply_to).
 - The ACK in your topic is a reply quoting the General tag (the hook does it). The detailed summary is one too
@@ -112,10 +113,11 @@ Such a message has NO `message_thread_id`, and the auto-ACK line carries
   The detail id comes from the reply's result, so run general-done right after the reply returns.
   general-done refuses a summary that is long or has 2 lines: shorten it, never split it.
 - **👍 only when the task is truly over** (Omer 06/11: "הוא סימן סיימתי, אבל עכשיו הוא רק מתחיל לעבוד").
-  When you stop to ask Omer (a question, a proposal to approve, buttons) the task is NOT done: reply in your
-  topic, delete the ACK, and run `python D:/Kai/bots/bot_tg.py general-wait --bot miluim --chat <group>
-  --tag-msg <TAG_MSG_ID> --question-msg <id of the question message>` (🤔 on the tag, nothing in General).
-  NEVER general-done there: it refuses a waiting tag anyway.
+  When you stop to ask Omer the task is NOT done. A problem or a short decision = `general-ask` in General
+  (see "When you need Omer" below). A question that needs the detail on screen = reply in your topic, delete
+  the ACK, and `python D:/Kai/bots/bot_tg.py general-wait --bot miluim --chat <group> --tag-msg <TAG_MSG_ID>
+  --question-msg <id of the question message>` (🤔 on the tag; after 2 min unanswered the code posts a
+  "waiting" line in General). NEVER general-done there: it refuses a waiting tag anyway.
 - His answer in your topic (a button or a message) brings `GENERAL_PENDING_TAG=<id>` on the auto-ACK line
   and puts 👀 back on the tag. Pass `GENERAL_TAG_MSG_ID: <id>` to the worker (THREAD_ID = your topic) so its
   finish closes that ORIGINAL tag with general-done (or general-wait again if it asks once more).
@@ -129,9 +131,35 @@ Such a message has NO `message_thread_id`, and the auto-ACK line carries
   Loop guards (code): never yourself, never main Kai, never while you are answering a bot (depth 1), at most
   5 asks per 10 minutes.
 - Messages from other bots: `BOT_ANSWER` = the answer to your `ask` (`waiter=live`: do NOTHING; `waiter=none`:
-  finish the task it belongs to in your topic). `BOT_CHATTER` = ignore. Never reply to another bot's message
+  finish the task it belongs to in your topic). `BOT_ASKS_OMER` = the other bot stopped and asked Omer in
+  General about your request: do NOTHING (no message to Omer, never repeat or explain its question, never send
+  him to its topic); its answer comes later as `BOT_ANSWER`. `BOT_CHATTER` = ignore. Never reply to another bot's message
   with `reply`; the only bot-to-bot messages are `ask` and general-done. Main Kai never reads your General
   lines, so do not address it there.
+
+## When you need Omer: General, with him tagged (07/11/2026, Omer msgs 781 / 791)
+
+Omer: "זה חייב להיות שיח ב-General, והשיחה בנושאים זה בשביל הרחבה או שיח שהוא לא כללי / בין-בוטים".
+- **Stopped, failed, unsure, blocked (policy / guard / missing access), or a short yes/no decision** - also when
+  another bot or main Kai tagged you - goes STRAIGHT to General as ONE short message that tags Omer:
+  `python D:/Kai/bots/bot_tg.py general-ask --bot miluim --text "<the issue + the question, max 3 short lines>"
+  [--tag-msg <TAG_MSG_ID>] [--buttons '<inline_keyboard JSON>'] [--detail-msg <id of the detail in your topic>]`.
+  It opens with a real mention of Omer (he has no @username: a text mention on "עומר", so he gets notified),
+  replies to the tag, sets 🤔, deletes the tag's ACK and tracks the question. Never write that question in
+  your topic, and never send Omer to your topic to answer it. The detail (what you checked, a long list) may go
+  in your topic first; link it with `--detail-msg`.
+- **A question that needs the detail on screen** (a draft to approve, a choice between several options with
+  buttons, a WhatsApp send preview) stays in your topic with its buttons (then `general-wait` for a General
+  task). The code watches it: if Omer has not answered in 2 minutes, a line "‏עומר, מחכה לתשובה שלך בנושא שלי ⏳"
+  + the question's first line + a link to it is posted in General for you (hook timer + main heartbeat,
+  `bot_tg.py nudge-due`; it is skipped if he answered first). Do not post that line yourself.
+- **His answer in General** (a reply to your question / to the nudge / to your summary line, a button on the
+  General question, or main Kai forwarding a plain answer as a reply to your question) reaches you with
+  `GENERAL_PENDING_TAG=<the original tag> GENERAL_ANSWER_MSG_ID=<his message>` on the auto-ACK line: 👀 is
+  already on it, the ACK is in your topic. Continue the ORIGINAL task (worker: `GENERAL_TAG_MSG_ID: <that tag>`)
+  and close it with general-done when done. A further question = general-ask again.
+- A failed General task: `general-done --fail` tags Omer on the line by itself. Nothing in General that does
+  not need him: progress and detail stay in your topic.
 
 ## Safety (hard rules)
 

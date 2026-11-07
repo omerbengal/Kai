@@ -117,6 +117,34 @@ def classify(attrs, content):
     return ("ack", TEXT_ACK)
 
 
+def _bot_tg():
+    if "D:/Kai/bots" not in sys.path:
+        sys.path.insert(0, "D:/Kai/bots")
+    import bot_tg
+    return bot_tg
+
+
+def bot_reply_owner(attrs):
+    """Omer replying in General to a DOMAIN bot's message (its question, nudge, summary line): Telegram
+    delivers it to that bot too, so it is that bot's, never main's (07/11/2026, Omer msg 781). Never raises."""
+    if not is_general(attrs) or "callback_data" in attrs or not attrs.get("reply_to_message_id"):
+        return None
+    try:
+        return _bot_tg().general_owner(attrs.get("chat_id"), attrs.get("reply_to_message_id"))
+    except Exception:
+        return None
+
+
+def open_bot_questions():
+    """Lines for every question a domain bot has open for Omer in General (main may route a plain answer)."""
+    try:
+        qs = _bot_tg().open_questions()
+    except Exception:
+        return []
+    return [f'OPEN_BOT_QUESTION bot={b} question_msg={m} text="{(t or "").replace(chr(34), "")[:90]}"'
+            for b, m, t in qs[:5]]
+
+
 def registry_key(attrs):
     mid = attrs.get("message_id", "")
     if "callback_data" in attrs:
@@ -191,6 +219,14 @@ def handle(prompt, dry_run=False):
     lines = []
     for attrs, content in parse_channels(prompt):
         mid = attrs.get("message_id", "?")
+        owner = bot_reply_owner(attrs)
+        if owner:
+            lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=NONE reason=reply_to_bot BOT={owner}"
+                         f" (Omer is answering {owner}'s message; that bot receives it itself: do NOTHING, no"
+                         " reply, no ACK, no tag)")
+            continue
+        if is_general(attrs) and not dry_run:
+            lines.extend(open_bot_questions())
         kind, val = classify(attrs, content)
         if kind == "none":
             lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=NONE reason={val}")
