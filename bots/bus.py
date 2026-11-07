@@ -21,6 +21,9 @@ CLI (models; bots/guard.py makes sure --from / --bot is the calling bot itself):
   bus.py read   --from B --chat <alias|jid|name> [--limit 50] [--since-hours 24] --summary "..." [--timeout 120]
   bus.py search --from B --query <text> [--chat C] [--limit 30] --summary "..."
   bus.py draft  --from B --chat C --text "<exact text>" --summary "..."   -> REQUEST_ID, busok:N / busno:N
+  bus.py draft  --from B --chat C --file <image> [--text "<caption>"] --summary "..."     one image + caption
+  bus.py draft  --from B --chat C --file P1 --caption C1 --file P2 --caption C2 ... --summary "..."  (max 10,
+                sent in this order; jpg/jpeg/png/gif/webp; signature only under the last one)
   bus.py wait   --id N --bot B [--timeout 180]
   bus.py status --id N | policy --bot B | audit [--today]
 Code only (guard blocks models from these):
@@ -47,8 +50,13 @@ LATE_DELIVER_S = 180
 LOCK_PORT = 8791
 RLM = "\u200f"
 
-KIND_CAP = {"wa_read": "whatsapp", "wa_search": "whatsapp", "wa_send": "whatsapp"}
-KIND_POLICY = {"wa_read": "read", "wa_search": "read", "wa_send": "send"}
+KIND_CAP = {"wa_read": "whatsapp", "wa_search": "whatsapp", "wa_send": "whatsapp", "wa_send_media": "whatsapp"}
+KIND_POLICY = {"wa_read": "read", "wa_search": "read", "wa_send": "send", "wa_send_media": "send"}
+SEND_KINDS = ("wa_send", "wa_send_media")
+# wa_send_media (07/11/2026, spec by the WhatsApp bot, msg 840): images with captions, in order. A NEW kind and
+# not an extension of wa_send, so an executor still running the old code fails it ("unknown kind") instead of
+# sending only the captions. The signature goes on the LAST image's caption only.
+MAX_MEDIA = 10
 
 SCHEMA = [
     """CREATE TABLE IF NOT EXISTS requests (
@@ -188,7 +196,9 @@ def create(from_bot, kind, payload, summary, db=None):
                            f"(config/bots.json wa_policy; Omer decides)")
     elif "*" not in policy(from_bot).get("read", []):
         raise BusError("policy: a search over ALL chats needs read '*'; pass --chat")
-    status = "draft" if kind == "wa_send" else "new"
+    if kind == "wa_send_media":
+        payload = dict(payload, items=media_items(payload.get("items")))
+    status = "draft" if kind in SEND_KINDS else "new"
     c = conn(db)
     cur = c.execute("INSERT INTO requests (from_bot, to_cap, kind, payload_json, summary, status, created_at)"
                     " VALUES (?,?,?,?,?,?,?)",
@@ -203,6 +213,23 @@ def create(from_bot, kind, payload, summary, db=None):
                   f"📤 העברתי ל{title(owner(row['to_cap']))}: {row['summary']} - מחכה לעדכון")
     c.close()
     return rid, payload
+
+
+def media_items(items):
+    """Validated [{file: abs path, caption}] for wa_send_media (1..MAX_MEDIA existing images)."""
+    import wa
+    items = list(items or [])
+    if not items:
+        raise BusError("no image given (--file)")
+    if len(items) > MAX_MEDIA:
+        raise BusError(f"at most {MAX_MEDIA} images per request")
+    out = []
+    for it in items:
+        try:
+            out.append({"file": wa.check_media(it.get("file")), "caption": (it.get("caption") or "").strip()})
+        except wa.WaError as e:
+            raise BusError(str(e))
+    return out
 
 
 def approve(bot, rid, approval_id, db=None):
@@ -256,6 +283,19 @@ def execute(row, wa_mod=None):
         if not row["approval_id"]:
             raise BusError("no approval recorded - refusing to send")
         return dict(wa_mod.send(p["chat"], p["text"]), chat=p.get("chat_name"))
+    if row["kind"] == "wa_send_media":
+        if not row["approval_id"]:
+            raise BusError("no approval recorded - refusing to send")
+        items = p.get("items") or []
+        sent = []
+        for i, it in enumerate(items):
+            try:
+                sent.append(wa_mod.send_media(p["chat"], it["file"], it.get("caption", ""),
+                                              sign=(i == len(items) - 1)))
+            except Exception as e:  # no automatic retry: a half-sent series must be looked at, not repeated
+                raise BusError(f"נשלחו {len(sent)} מתוך {len(items)} ({type(e).__name__}: {e})"[:400])
+        return {"sent": True, "count": len(sent), "chat": p.get("chat_name"),
+                "files": [s.get("file") for s in sent]}
     raise BusError(f"unknown kind {row['kind']}")
 
 
@@ -376,6 +416,28 @@ def _arg(argv, flag, default=None):
     return argv[argv.index(flag) + 1] if flag in argv else default
 
 
+def parse_media_args(argv):
+    """--file P [--caption C] pairs, in order; a single --file may take its caption from --text."""
+    items = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--file" and i + 1 < len(argv):
+            items.append({"file": argv[i + 1], "caption": ""})
+            i += 2
+            continue
+        if a == "--caption" and i + 1 < len(argv):
+            if not items or items[-1]["caption"]:
+                raise BusError("--caption must follow its --file")
+            items[-1]["caption"] = argv[i + 1]
+            i += 2
+            continue
+        i += 1
+    if len(items) == 1 and not items[0]["caption"] and _arg(argv, "--text"):
+        items[0]["caption"] = _arg(argv, "--text")
+    return items
+
+
 def _single_instance():
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
@@ -431,6 +493,9 @@ def main(argv):
                 payload = {"query": _arg(argv, "--query"), "chat": _arg(argv, "--chat"),
                            "limit": int(_arg(argv, "--limit", 30))}
                 kind = "wa_search"
+            elif "--file" in argv:
+                payload = {"chat": _arg(argv, "--chat"), "items": parse_media_args(argv)}
+                kind = "wa_send_media"
             else:
                 text = _arg(argv, "--text")
                 if not (text or "").strip():
@@ -440,6 +505,7 @@ def main(argv):
             rid, p = create(frm, kind, payload, _arg(argv, "--summary", kind))
             if cmd == "draft":
                 out = {"request_id": rid, "chat": p.get("chat_name"), "status": "draft",
+                       "items": p.get("items"),
                        "buttons": [{"text": "✅ שלח", "callback_data": f"busok:{rid}"},
                                    {"text": "❌ בטל", "callback_data": f"busno:{rid}"}],
                        "next": "show Omer the exact text + these buttons; after BUS_APPROVAL approved run wait"}

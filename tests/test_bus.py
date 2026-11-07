@@ -121,3 +121,114 @@ def test_caller_identity_from_env(monkeypatch, tmp_path):
 def test_signature_added_once():
     assert wa.with_signature("היי").endswith(wa.SIGNATURE)
     assert wa.with_signature(wa.with_signature("היי")).count(wa.SIGNATURE) == 1
+
+
+# --- wa_send_media (07/11/2026, spec msg 840: images with captions) -----------------------------------------
+
+class FakeWaMedia(FakeWa):
+    media = []
+    fail_at = None
+
+    @staticmethod
+    def send_media(chat, path, caption="", sign=True):
+        if FakeWaMedia.fail_at is not None and len(FakeWaMedia.media) == FakeWaMedia.fail_at:
+            raise wa.WaError("bridge refused")
+        FakeWaMedia.media.append((chat, os.path.basename(path), caption, sign))
+        return {"sent": True, "file": os.path.basename(path)}
+
+
+def _imgs(tmp_path, n):
+    out = []
+    for i in range(n):
+        p = tmp_path / f"shot{i}.png"
+        p.write_bytes(b"\x89PNG")
+        out.append(str(p))
+    return out
+
+
+def _approve(rid, db):
+    omer = (f'<channel source="plugin:telegram:telegram" chat_id="-1" message_id="9" user_id="{bus.OMER_ID}" '
+            f'callback_data="busok:{rid}">[callback: busok:{rid}]</channel>')
+    assert "approved" in bus.approve_hook("whatsapp", omer, db)[0]
+
+
+def test_media_send_in_order_signature_only_on_last(monkeypatch, tmp_path):
+    db, posts = setup(monkeypatch, tmp_path)
+    FakeWaMedia.media, FakeWaMedia.fail_at = [], None
+    files = _imgs(tmp_path, 3)
+    items = [{"file": f, "caption": f"כיתוב {i}"} for i, f in enumerate(files)]
+    rid, p = bus.create("whatsapp", "wa_send_media", {"chat": "staff", "items": items}, "3 תמונות", db)
+    assert [os.path.isabs(i["file"]) for i in p["items"]] == [True] * 3
+    assert bus.serve_once(db, FakeWaMedia) == 0 and FakeWaMedia.media == []   # draft until Omer's button
+    _approve(rid, db)
+    assert bus.serve_once(db, FakeWaMedia) == 1
+    assert FakeWaMedia.media == [("111@g.us", "shot0.png", "כיתוב 0", False),
+                                 ("111@g.us", "shot1.png", "כיתוב 1", False),
+                                 ("111@g.us", "shot2.png", "כיתוב 2", True)]
+    out = bus.wait(rid, "whatsapp", 5, db, sleep=lambda s: None)
+    assert out["status"] == "done" and out["result"]["count"] == 3
+
+
+def test_media_partial_failure_reports_k_of_n_no_retry(monkeypatch, tmp_path):
+    db, posts = setup(monkeypatch, tmp_path)
+    FakeWaMedia.media, FakeWaMedia.fail_at = [], 1
+    items = [{"file": f, "caption": "x"} for f in _imgs(tmp_path, 3)]
+    rid, _ = bus.create("whatsapp", "wa_send_media", {"chat": "staff", "items": items}, "s", db)
+    _approve(rid, db)
+    bus.serve_once(db, FakeWaMedia)
+    out = bus.wait(rid, "whatsapp", 5, db, sleep=lambda s: None)
+    assert out["status"] == "failed" and "נשלחו 1 מתוך 3" in out["error"]
+    assert bus.serve_once(db, FakeWaMedia) == 0 and len(FakeWaMedia.media) == 1   # never retried
+
+
+def test_media_validation(monkeypatch, tmp_path):
+    db, posts = setup(monkeypatch, tmp_path)
+    import pytest
+    for items in ([], [{"file": str(tmp_path / "missing.png")}], [{"file": __file__}],
+                  [{"file": f} for f in _imgs(tmp_path, 11)]):
+        with pytest.raises(bus.BusError):
+            bus.create("whatsapp", "wa_send_media", {"chat": "staff", "items": items}, "s", db)
+    with pytest.raises(bus.BusError):   # the policy still applies to images
+        bus.create("miluim", "wa_send_media", {"chat": "other", "items": [{"file": _imgs(tmp_path, 1)[0]}]}, "s", db)
+
+
+def test_media_needs_approval_even_if_status_forced(monkeypatch, tmp_path):
+    db, posts = setup(monkeypatch, tmp_path)
+    FakeWaMedia.media, FakeWaMedia.fail_at = [], None
+    rid, _ = bus.create("whatsapp", "wa_send_media",
+                        {"chat": "staff", "items": [{"file": _imgs(tmp_path, 1)[0]}]}, "s", db)
+    c = bus.conn(db)
+    c.execute("UPDATE requests SET status='new' WHERE id=?", (rid,))   # no approval_id
+    c.commit()
+    bus.serve_once(db, FakeWaMedia)
+    assert FakeWaMedia.media == []
+
+
+def test_parse_media_args():
+    a = ["bus.py", "draft", "--file", "a.png", "--caption", "א", "--file", "b.png", "--caption", "ב"]
+    assert bus.parse_media_args(a) == [{"file": "a.png", "caption": "א"}, {"file": "b.png", "caption": "ב"}]
+    assert bus.parse_media_args(["draft", "--file", "a.png", "--text", "כיתוב"]) == [{"file": "a.png",
+                                                                                       "caption": "כיתוב"}]
+
+
+def test_wa_send_media_payload(tmp_path):
+    img = tmp_path / "x.jpg"
+    img.write_bytes(b"jpg")
+    seen = {}
+
+    class Resp:
+        def read(self):
+            return b'{"success": true, "message": "ok"}'
+
+    def opener(req, timeout):
+        seen["body"], seen["timeout"] = json.loads(req.data.decode("utf-8")), timeout
+        return Resp()
+
+    out = wa.send_media("1@g.us", str(img), "שלום", sign=True, opener=opener)
+    assert out["sent"] and seen["timeout"] == 60
+    assert seen["body"]["media_path"] == os.path.abspath(str(img))
+    assert seen["body"]["message"] == "שלום\n" + wa.SIGNATURE
+    wa.send_media("1@g.us", str(img), "שלום", sign=False, opener=opener)
+    assert seen["body"]["message"] == "שלום"
+    wa.send_media("1@g.us", str(img), "", sign=True, opener=opener)
+    assert seen["body"]["message"] == wa.SIGNATURE

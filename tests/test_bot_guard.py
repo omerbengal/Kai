@@ -97,6 +97,9 @@ def test_bus_rules_stage2():
     assert chk("wa", "Bash", command="python D:/Kai/bots/wa.py read --chat staff") is None
     assert chk("wa", "Bash", command='python -c "import sys; sys.path.insert(0,\'D:/Kai/bots\'); import wa; wa.send(1,2)"')
     assert chk("wa", "Bash", command="curl -d {} http://localhost:8080/api/send")
+    # 07/11/2026: images go through `bus.py draft --file` + Omer's button too, never wa.send_media directly
+    assert chk("wa", "Bash", command='python -c "import wa; wa.send_media(1, 2, 3)"')
+    assert chk("wa", "Bash", command='python D:/Kai/bots/bus.py draft --from wa --chat x --file D:/a.png --text "y"') is None
     assert chk("wa", "Bash", command="python D:/Kai/bots/bus.py serve")
 
 

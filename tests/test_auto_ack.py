@@ -154,6 +154,7 @@ def test_general_registry_key_never_collides_with_private():
 
 def test_general_ack_sent_to_group_without_thread(tmp_path, monkeypatch):
     monkeypatch.setattr(auto_ack, "REGISTRY_DIR", str(tmp_path))
+    monkeypatch.setattr(auto_ack, "open_bot_questions", lambda: [])   # live bots' open questions are not this test
     calls = []
     monkeypatch.setattr(auto_ack, "send_ack",
                         lambda text, reply_to, chat_id=None: calls.append((text, reply_to, chat_id)) or 55)
@@ -186,3 +187,45 @@ def test_send_ack_general_payload_and_no_db_row(monkeypatch):
     assert saved == []                    # group ids collide with private ones: no messages row
     assert auto_ack.send_ack("🔄 ⏳", "302") == 9
     assert seen["chat_id"] == "${KAI_TELEGRAM_CHAT_ID}" and saved == [(9, "🔄 ⏳")]
+
+
+# --- bot -> main Kai handoff (07/11/2026, Omer msgs 842 / 847) ----------------------------------------------
+WA_BOT = "9010629958"
+
+
+def _bots(monkeypatch, tmp_path):
+    monkeypatch.setattr(auto_ack, "bot_sender",
+                        lambda attrs: "whatsapp" if attrs.get("user_id") == WA_BOT and auto_ack.is_general(attrs)
+                        else None)
+    monkeypatch.setattr(auto_ack, "BOT_HANDOFF_LOG", str(tmp_path / "h.json"))
+    monkeypatch.setattr(auto_ack, "bot_handoff_allowed",
+                        lambda now=None, path=None, record=True: True)
+    monkeypatch.setattr(auto_ack, "open_bot_questions", lambda: [])
+    monkeypatch.setattr(auto_ack, "bot_reply_owner", lambda attrs: "whatsapp")   # must be skipped for bots
+
+
+def test_bot_tag_of_main_is_a_handoff_task(tmp_path, monkeypatch):
+    _bots(monkeypatch, tmp_path)
+    monkeypatch.setattr(auto_ack, "REGISTRY_DIR", str(tmp_path))
+    monkeypatch.setattr(auto_ack, "send_ack", lambda text, reply_to, chat_id=None: 77)
+    out = auto_ack.handle(ch(f"@{auto_ack.MAIN_USERNAME} תבנה שליחת תמונה", chat_id=GEN, message_id="840",
+                             user_id=WA_BOT))
+    assert "AUTO_ACK_MSG_ID=77" in out[0] and "FROM_BOT=whatsapp" in out[0] and "BOT_HANDOFF=1" in out[0]
+
+
+def test_bot_message_without_main_tag_is_chatter(tmp_path, monkeypatch):
+    _bots(monkeypatch, tmp_path)
+    out = auto_ack.handle(ch("‏סיכמתי את הדיון", chat_id=GEN, message_id="841", user_id=WA_BOT))
+    assert "reason=bot_chatter" in out[0] and "AUTO_ACK_MSG_ID=NONE" in out[0]
+
+
+def test_bot_handoff_rate_limit(tmp_path):
+    p = str(tmp_path / "h.json")
+    assert all(auto_ack.bot_handoff_allowed(now=1000 + i, path=p) for i in range(auto_ack.BOT_HANDOFF_MAX_PER_HOUR))
+    assert not auto_ack.bot_handoff_allowed(now=1100, path=p)
+    assert auto_ack.bot_handoff_allowed(now=1000 + 3601 + auto_ack.BOT_HANDOFF_MAX_PER_HOUR, path=p)
+
+
+def test_omer_is_never_a_bot_sender():
+    attrs = auto_ack.parse_channels(ch("x", chat_id=GEN, user_id="${KAI_TELEGRAM_CHAT_ID}"))[0][0]
+    assert auto_ack.bot_sender(attrs) is None

@@ -238,6 +238,36 @@ def send(jid, text, opener=urllib.request.urlopen):
     return {"sent": True, "bridge": str(data.get("message", ""))[:200]}
 
 
+MEDIA_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp")
+
+
+def check_media(path):
+    """Absolute path of an existing image file, or WaError. Images only (07/11/2026 spec, msg 840)."""
+    p = os.path.abspath(str(path or "").strip().strip('"'))
+    if os.path.splitext(p)[1].lower() not in MEDIA_EXTS:
+        raise WaError(f"not an image ({', '.join(MEDIA_EXTS)}): {path}")
+    if not os.path.isfile(p):
+        raise WaError(f"file not found: {path}")
+    return p
+
+
+def send_media(jid, path, caption="", sign=True, opener=urllib.request.urlopen):
+    """Raw bridge send of ONE image with a caption. Callers: bus.py serve ONLY (approved request).
+    The bridge's /api/send takes media_path and sends `message` as the image caption (main.go, Caption)."""
+    p = check_media(path)
+    caption = (caption or "").strip()
+    if sign:
+        caption = with_signature(caption).lstrip("\n")
+    payload = json.dumps({"recipient": jid, "message": caption, "media_path": p},
+                         ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(f"{BRIDGE}/api/send", data=payload,
+                                 headers={"Content-Type": "application/json; charset=utf-8"})
+    data = json.loads(opener(req, timeout=60).read())
+    if not data.get("success"):
+        raise WaError(f"bridge refused: {str(data)[:200]}")
+    return {"sent": True, "file": os.path.basename(p), "bridge": str(data.get("message", ""))[:200]}
+
+
 def _arg(argv, flag, default=None):
     return argv[argv.index(flag) + 1] if flag in argv else default
 

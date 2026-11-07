@@ -159,6 +159,11 @@ def hook_save(bot, mode, data, db_path=DB_PATH):
                     schedule_nudge(bot, ti.get("chat_id"), ti.get("message_thread_id"), ids[-1], ti.get("text", ""))
                 except Exception as e:
                     print(f"[bot_tg] nudge schedule failed: {e}", file=sys.stderr)
+            if not ti.get("message_thread_id") and ids[-1]:
+                try:
+                    settle_on_general_reply(bot, ti.get("chat_id"), ids[-1])
+                except Exception as e:
+                    print(f"[bot_tg] settle failed: {e}", file=sys.stderr)
     if mode == "incoming" and db_path is None:
         _buttons("on_incoming", data.get("prompt", "") or data.get("content", ""), bot)
 
@@ -260,6 +265,13 @@ VOICE_ACK = "🎤 מתמלל... ⏳"
 OMER_DM = os.environ.get("KAI_TELEGRAM_CHAT_ID", "")
 OMER_ID = os.environ.get("KAI_TELEGRAM_CHAT_ID", "")
 MAIN_BOT_ID = "<REDACTED_SECRET>"   # main Kai: its General tags are handoffs (stage 3)
+# Bot -> main Kai handoff (07/11/2026, Omer msgs 842 / 847: "למה אתה שולח לי אבל?"): a domain bot that needs
+# something only main Kai can do (locked code, a restart, main-only scripts) tags main Kai in General itself
+# (`ask --to main`) instead of asking Omer to relay. Main Kai's auto-ACK turns that tag into a task.
+MAIN_NAME = "main"
+MAIN_USERNAME = "Nova_PersonalAssistant_Bengi_bot"
+MAIN_ASK_WINDOW_S = 3600
+MAIN_ASK_MAX_PER_WINDOW = 3     # per bot: a handoff to main is rare (a build / restart request)
 # Bot-to-bot requests through General (06/11/2026, Omer msgs 358 / 361, "חלוקת תפקידים טהורה")
 ASK_WINDOW_S = 600
 ASK_MAX_PER_WINDOW = 5          # outgoing asks per bot per window
@@ -356,6 +368,7 @@ def general_done(bot, chat, tag_msg, summary, ok=True, detail_msg=None, sender=N
         reactor(bot, chat, tag_msg, DONE_OK if ok else DONE_FAIL)
     except Exception:
         pass
+    settle_answers(bot, chat, tag_msg, DONE_OK if ok else DONE_FAIL, reactor)
     try:
         _set_tag(bot, tag_msg, chat=chat, state="done", detail=str(detail_msg) if detail_msg else None)
     except Exception:
@@ -442,6 +455,7 @@ def general_ask(bot, chat, text, tag_msg=None, keyboard=None, detail_msg=None, s
             reactor(bot, chat, tag_msg, WAITING)
         except Exception:
             pass
+        settle_answers(bot, chat, tag_msg, DONE_OK, reactor)
     _set_tag(bot, key, chat=chat, state="waiting", question=str(mid), where="general", qtext=lines_[0][:120])
     close_tag_ack(bot, chat, key, deleter)
     return mid
@@ -689,6 +703,54 @@ def _set_tag(bot, tag, **fields):
     return t
 
 
+def settle_answers(bot, chat, tag, emoji=None, reactor=None):
+    """Omer's General answers to a tag's question got 👀 from the hook (they reopen the tag). Whenever the tag
+    leaves "working" - done, failed, or the bot stops again with a question / refusal - each of those answers
+    gets 👍 (👎 on a failure), so no 👀 is left on a message the bot already handled (07/11/2026, Omer msg 852:
+    👀 stayed on 837 / 842 after the WhatsApp bot answered them with 841 / 846). Never raises."""
+    reactor = reactor or react
+    try:
+        t = load_tags(bot).get(str(tag), {})
+        answers = [a for a in (t.get("answers") or []) if str(a) != str(tag)]
+        if not answers:
+            return []
+        done = []
+        for a in answers:
+            try:
+                reactor(bot, chat or t.get("chat"), a, emoji or DONE_OK)
+                done.append(str(a))
+            except Exception as e:
+                log_react_failure(bot, chat or t.get("chat"), a, emoji or DONE_OK, e)
+        _set_tag(bot, tag, answers=[])
+        return done
+    except Exception:
+        return []
+
+
+def settle_on_general_reply(bot, chat, reply_id, reactor=None, deleter=None, hours=REOPEN_HOURS):
+    """Safety net (PostToolUse on the `reply` tool): the bot answered Omer in General with a PLAIN reply while
+    a tag he had reopened (an answer of his got 👀) was still "working" - instead of general-done /
+    general-ask (07/11/2026, Omer msg 852: 846 answered 842, and 👀 stayed on 842 and on the tag). That reply
+    is the bot stopping with a question / refusal: his answers get 👍, the tag goes back to 🤔 waiting on this
+    reply, and its topic ACK is deleted. Only tags with answers are touched; a fresh tag is closed by the model."""
+    reactor = reactor or react
+    if str(chat) != str(kai_bots.bot(bot).get("group_id")):
+        return []
+    now = datetime.now(timezone.utc).timestamp()
+    hit = []
+    for k, v in load_tags(bot).items():
+        if v.get("state") == "working" and v.get("answers") and now - v.get("ts", 0) < hours * 3600:
+            settle_answers(bot, chat, k, DONE_OK, reactor)
+            try:
+                reactor(bot, chat, k, WAITING)
+            except Exception:
+                pass
+            _set_tag(bot, k, state="waiting", question=str(reply_id))
+            close_tag_ack(bot, chat, k, deleter)
+            hit.append(k)
+    return hit
+
+
 def _pin(cmd, bot, chat, msg):
     """pin / unpin a bot ACK through scripts/tg_pin.py with this bot's token. Never raises."""
     try:
@@ -764,6 +826,8 @@ def react_tag(bot, chat, msg, emoji, reactor=None, deleter=None):
     if t and closing and t.get("state") == "waiting":
         raise ValueError(f"tag {msg} is waiting for Omer's answer: no 👍 yet")
     reactor(bot, chat, msg, emoji)
+    if t and (closing or emoji == WAITING):
+        settle_answers(bot, chat, msg, emoji if closing else DONE_OK, reactor)
     if t and closing:
         _set_tag(bot, msg, state="done")
         close_tag_ack(bot, chat, msg, deleter)
@@ -777,6 +841,7 @@ def general_wait(bot, chat, tag_msg, question_msg=None, reactor=None, deleter=No
         reactor(bot, chat, tag_msg, WAITING)
     except Exception:
         pass
+    settle_answers(bot, chat, tag_msg, DONE_OK, reactor)
     _set_tag(bot, tag_msg, chat=chat, state="waiting", question=str(question_msg) if question_msg else None)
     close_tag_ack(bot, chat, tag_msg, deleter)
     if question_msg and schedule:
@@ -835,6 +900,7 @@ def close_on_ack_delete(bot, ack_id, reactor=None):
                 reactor(bot, v.get("chat"), k, DONE_OK)
             except Exception:
                 pass
+            settle_answers(bot, v.get("chat"), k, DONE_OK, reactor)
             _set_tag(bot, k, state="done", close_on_ack=None)
 
 
@@ -906,9 +972,9 @@ def ask(bot, to, text, origin_tag=None, sender=None, reactor=None, wait=ASK_DEFA
     allb = all_bots()
     if to == bot:
         raise ValueError("a bot never tags itself")
-    if to not in allb:
-        raise ValueError(f"unknown bot '{to}' (main Kai is not asked through General; tell Omer instead)")
-    uname = allb[to].get("username")
+    if to != MAIN_NAME and to not in allb:
+        raise ValueError(f"unknown bot '{to}' (main Kai = --to {MAIN_NAME})")
+    uname = MAIN_USERNAME if to == MAIN_NAME else allb[to].get("username")
     if not uname:
         raise ValueError(f"{to} has no username in config/bots.json")
     text = (text or "").strip()
@@ -923,6 +989,12 @@ def ask(bot, to, text, origin_tag=None, sender=None, reactor=None, wait=ASK_DEFA
     recent = [v for v in load_requests(bot).values() if now - v.get("ts", 0) < ASK_WINDOW_S]
     if len(recent) >= ASK_MAX_PER_WINDOW:
         raise ValueError(f"rate limit: {ASK_MAX_PER_WINDOW} requests to other bots in {ASK_WINDOW_S // 60} min")
+    if to == MAIN_NAME:
+        to_main = [v for v in load_requests(bot).values()
+                   if v.get("to") == MAIN_NAME and now - v.get("ts", 0) < MAIN_ASK_WINDOW_S]
+        if len(to_main) >= MAIN_ASK_MAX_PER_WINDOW:
+            raise ValueError(f"rate limit: {MAIN_ASK_MAX_PER_WINDOW} requests to main Kai per hour; tell Omer in"
+                             " General instead (general-ask)")
     chat = kai_bots.bot(bot).get("group_id")
     mid = sender(bot, chat, f"@{uname} {text}", thread=None, reply_to=None, silent=False)
     _update_request(bot, mid, to=to, text=text, chat=str(chat), ts=now, state="waiting",
@@ -1049,6 +1121,8 @@ def auto_ack(bot, prompt, dry_run=False, sender=None, reactor=None):
         from_bot = bot_name_by_id(attrs.get("user_id"))
         if from_bot == bot:
             from_bot = None
+        if not from_bot and attrs.get("user_id") == MAIN_BOT_ID and attrs.get("reply_to_message_id") and                 load_requests(bot).get(str(attrs.get("reply_to_message_id")), {}).get("to") == MAIN_NAME:
+            from_bot = MAIN_NAME   # main Kai answering this bot's `ask --to main`: an answer, never a new task
         if from_bot:
             try:
                 bline = bot_inbound(bot, from_bot, attrs, content, reactor=reactor, dry_run=dry_run)
@@ -1074,7 +1148,8 @@ def auto_ack(bot, prompt, dry_run=False, sender=None, reactor=None):
                         reactor(bot, attrs.get("chat_id"), hit, SEEN)
                     except Exception:
                         pass
-                _set_tag(bot, hit, state="working")
+                ans = [a for a in (t.get("answers") or []) if a != str(mid)] + [str(mid)]
+                _set_tag(bot, hit, state="working", answers=ans)
         elif gen:
             nq, ne = nudge_for(bot, attrs.get("reply_to_message_id"))
             if nq:

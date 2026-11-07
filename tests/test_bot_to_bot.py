@@ -75,9 +75,9 @@ def test_ask_posts_a_tag_in_general(bots):
     assert req["to"] == "whatsapp" and req["state"] == "waiting"
 
 
-def test_ask_refuses_self_main_and_unknown(bots):
+def test_ask_refuses_self_and_unknown(bots):
     r = Rec()
-    for target in ("miluim", "main", "nobody"):
+    for target in ("miluim", "nobody"):
         with pytest.raises(ValueError):
             bot_tg.ask("miluim", target, "x", sender=r.send, reactor=r.react, wait=0)
     assert r.sends == []
@@ -239,3 +239,37 @@ def test_no_typing_for_another_bots_answer():
     assert bt.parse_open(ans, GROUP, own_topic="2") is None
     tag = chan("700", MIL_ID, "@<bot-username> כמה הודעות?")
     assert bt.parse_open(tag, GROUP, own_topic="121") == (GROUP, "121", "700")
+
+
+# ---- bot -> main Kai handoff (07/11/2026, Omer msgs 842 / 847) -------------------------------------------
+# The WhatsApp bot asked Omer to relay a build request to main Kai ("למה אתה שולח לי אבל?"). Now a bot tags
+# main Kai in General itself; main's reply to that tag is an answer, never a new task for the bot.
+
+def test_ask_main_tags_main_kai_in_general(bots):
+    r = Rec()
+    out = bot_tg.ask("whatsapp", "main", "תבנה שליחת תמונה לפי המפרט", sender=r.send, reactor=r.react, wait=0)
+    s = r.sends[0]
+    assert s["text"].startswith("@" + bot_tg.MAIN_USERNAME + " ") and s["thread"] is None and s["chat"] == GROUP
+    assert bot_tg.load_requests("whatsapp")[str(out["request_msg"])]["to"] == "main"
+
+
+def test_ask_main_rate_limit(bots):
+    r = Rec()
+    for _ in range(bot_tg.MAIN_ASK_MAX_PER_WINDOW):
+        bot_tg.ask("whatsapp", "main", "x", sender=r.send, reactor=r.react, wait=0)
+    with pytest.raises(ValueError):
+        bot_tg.ask("whatsapp", "main", "x", sender=r.send, reactor=r.react, wait=0)
+
+
+def test_main_reply_to_the_request_is_an_answer_not_a_task(bots):
+    r = Rec()
+    out = bot_tg.ask("whatsapp", "main", "תבנה", sender=r.send, reactor=r.react, wait=0)
+    rid = str(out["request_msg"])
+    ack = bot_tg.auto_ack("whatsapp", chan("950", MAIN_ID, "🔄 ⏳", reply_to=rid), sender=Rec().send,
+                          reactor=Rec().react)
+    assert "bot_ack" in ack[0]
+    lines = bot_tg.auto_ack("whatsapp", chan("951", MAIN_ID, "נבנה ופעיל", reply_to=rid), sender=Rec().send,
+                            reactor=Rec().react)
+    assert "BOT_ANSWER" in lines[0] and "from=main" in lines[0]
+    assert bot_tg.load_requests("whatsapp")[rid]["state"] == "answered"
+    assert "951" not in bot_tg.load_tags("whatsapp")

@@ -44,7 +44,7 @@ MAIN_STATE = [
 # WhatsApp bot (its sends go through `bus.py draft` + Omer's button too).
 BUS_CODE_ONLY = [
     r"bus\.py\W+(approve-hook|serve)\b", r"kaibots/_bus", r"\bbus\.db\b",
-    r"/api/send\b", r"\bwa\.send\b", r"\bwhatsapp_send", r"\bimport\s+bus\b", r"from\s+bus\s+import",
+    r"/api/send\b", r"\bwa\.send\b", r"\bsend_media\b", r"\bwhatsapp_send", r"\bimport\s+bus\b", r"from\s+bus\s+import",
 ]
 NO_WA_EXTRA = [r"bots/wa\.py", r"\bimport\s+wa\b", r"from\s+wa\s+import",
                r"[a-z_]*_wa\.py\b", r"\bwhatsapp_[a-z_]+\.py\b"]

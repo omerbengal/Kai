@@ -285,3 +285,60 @@ def test_open_questions_lists_general_asks_and_nudges(bots):
     qs = bot_tg.open_questions()
     assert ("whatsapp", str(q), "לסכם בכל זאת?") in qs
     assert any(b == "trading" and m == "901" for b, m, _ in qs)
+
+
+# ---- 👀 on Omer's General answers ends when the bot finishes (07/11/2026, Omer msg 852) ------------------
+# 837 / 842 kept 👀 after the WhatsApp bot answered them (841 / 846): a stop with a question or a refusal is
+# also a finish for the answer message.
+
+def _answered(r=None):
+    q = _asked()
+    bot_tg.auto_ack("whatsapp", chan("800", OMER, "כן, תסכם", reply_to=q), sender=Rec().send,
+                    reactor=(r or Rec()).react)
+    return q
+
+
+def test_done_settles_omers_answer(bots):
+    _answered()
+    r = Rec()
+    bot_tg.general_done("whatsapp", GROUP, "751", "סיכמתי", sender=r.send, reactor=r.react)
+    assert ("whatsapp", "751", "👍") in r.reacts and ("whatsapp", "800", "👍") in r.reacts
+    assert bot_tg.load_tags("whatsapp")["751"]["answers"] == []
+
+
+def test_failed_done_settles_with_thumbs_down(bots):
+    _answered()
+    r = Rec()
+    bot_tg.general_done("whatsapp", GROUP, "751", "נכשל", ok=False, sender=r.send, reactor=r.react)
+    assert ("whatsapp", "800", "👎") in r.reacts
+
+
+def test_asking_again_settles_the_answer_and_waits(bots):
+    _answered()
+    r = Rec()
+    bot_tg.general_ask("whatsapp", GROUP, "נעצרתי: הקוד נעול", tag_msg="751", sender=r.send, reactor=r.react,
+                       registrar=Rec().reg)
+    assert ("whatsapp", "800", "👍") in r.reacts and ("whatsapp", "751", "🤔") in r.reacts
+
+
+def test_plain_general_reply_safety_net(bots):
+    """The 846 case: the bot answered with a plain `reply` in General, no general-ask / general-done."""
+    _answered()
+    r = Rec()
+    hit = bot_tg.settle_on_general_reply("whatsapp", GROUP, 846, reactor=r.react, deleter=lambda *a: None)
+    assert hit == ["751"]
+    assert ("whatsapp", "800", "👍") in r.reacts and ("whatsapp", "751", "🤔") in r.reacts
+    t = bot_tg.load_tags("whatsapp")["751"]
+    assert t["state"] == "waiting" and t["question"] == "846"
+    # a second answer to that reply reopens it again, and is settled again on the next finish
+    bot_tg.auto_ack("whatsapp", chan("847", OMER, "למה?", reply_to="846"), sender=Rec().send, reactor=Rec().react)
+    assert bot_tg.load_tags("whatsapp")["751"]["answers"] == ["847"]
+
+
+def test_plain_reply_in_topic_or_without_answers_touches_nothing(bots):
+    bot_tg.auto_ack("whatsapp", chan("751", TR_ID, "@kai__whatsapp_bot תסכם"), sender=Rec().send,
+                    reactor=Rec().react)
+    r = Rec()
+    assert bot_tg.settle_on_general_reply("whatsapp", GROUP, 900, reactor=r.react) == []   # fresh tag, no answers
+    assert bot_tg.settle_on_general_reply("whatsapp", "${KAI_TELEGRAM_CHAT_ID}", 900, reactor=r.react) == []
+    assert r.reacts == [] and bot_tg.load_tags("whatsapp")["751"]["state"] == "working"

@@ -210,3 +210,24 @@ WhatsApp now; documented as the general rule in the bot template.
 - Not covered (deliberately): scheduled Windows-task scripts keep their own bridge calls (cohort_status /
   registration_status posts, signals_tracker / group_list_alerts reads), per Omer 06/11 msg 22617.
 - Tests: tests/test_bot_to_bot.py, tests/test_bot_guard.py, tests/test_bus.py, tests/test_kai_bots.py.
+
+## 6. Bot -> main Kai handoff (07/11/2026, Omer msgs 842 / 847: "למה אתה שולח לי אבל?")
+
+The WhatsApp bot needed a code change it may not make (bots/wa.py, bus.py are guarded) and asked Omer to
+relay its spec to main Kai. Now the bot asks main Kai itself:
+- Bot: `bot_tg.py ask --bot X --to main --text "..." --wait 0` tags `@Nova_PersonalAssistant_Bengi_bot` in
+  General (max 3 per bot per hour, depth 1 still applies). Main's reply to that tag = `BOT_ANSWER from=main`
+  in the bot's hook (main's ACK = `bot_ack`), never a new task.
+- Main: `scripts/auto_ack.py` sees a General message whose sender is a domain bot (`bot_id` in
+  config/bots.json): a tag of main = ACK + `FROM_BOT=X BOT_HANDOFF=1` (listener.md Step G.6: worker path,
+  NOT Omer's approval for outward / irreversible actions); anything else = `reason=bot_chatter`, nothing.
+  At most 6 bot handoffs per hour in total (`tmp/bot_handoffs.json`).
+- Delivery needs the bots' ids in main's General `allowFrom` (access.json). That is main's channel access,
+  so Omer applies it himself: `python D:/Kai/scripts/allow_bot_handoffs.py --apply` (`--revert` undoes).
+- Tests: tests/test_bot_to_bot.py (ask --to main), tests/test_auto_ack.py (handoff / chatter / rate),
+  tests/test_allow_bot_handoffs.py.
+
+Also 07/11 (Omer msg 852): Omer's General answers that got 👀 are tracked on the tag (`answers`) and turn 👍
+when the tag is closed (general-done), stops again (general-ask / general-wait / react 🤔), or the bot replies
+with a plain `reply` in General (PostToolUse safety net `settle_on_general_reply`). Tests:
+tests/test_bot_ask_omer.py.

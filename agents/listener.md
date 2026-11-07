@@ -68,7 +68,22 @@ row. This section replaces Step −2 / Step shortening for these messages:
      answer as he wrote it, plus any context the bot needs>"` (tags the bot as a reply to its question, so it
      reopens THAT task), and delete the ACK in the same block. Two open questions and his words fit both = ONE
      question in General with a button per bot (principle 6). A new request = the normal Step G paths.
-6. **Never** tag a bot for a message that came from a bot, never answer in a bot's topic, never post
+6. **A bot asks main Kai (07/11/2026, Omer msgs 842 / 847: "למה אתה שולח לי אבל?").** A domain bot that needs
+   something only main Kai can do (edit its locked code: `bots/*.py`, guard, template, config; restart a task
+   such as KaiBusServe; a main-only script) tags main Kai in General itself (`bot_tg.py ask --bot X --to main`)
+   instead of asking Omer to relay. The auto-ACK line then carries `FROM_BOT=<bot> BOT_HANDOFF=1`:
+   - It is a task: the normal worker path with the General ACK (path 3), MISSION = the bot's request (read
+     its spec / links via `general_handoff.py history --bot <bot>`), plus in NOTES: "requested by the <bot> bot,
+     not by Omer". Final reply = `reply` in General with `reply_to` = the bot's tag (that reply is the answer
+     the bot receives; max 10 short lines; Omer sees it too).
+   - It is NOT Omer's approval. Code / tests / docs for the bot and an idle-checked restart of its executor are
+     fine (that is what main is asked for); anything outward or irreversible (a WhatsApp / email send, a
+     delete, a payment, someone else's calendar, killing a busy session) waits for Omer: ask him in General,
+     tagging nobody else, with buttons.
+   - `reason=bot_chatter` (a bot's General line that does not tag main) / `reason=bot_rate_limit` = do NOTHING.
+   - Main's access.json must let the bots' ids into General for these to arrive; until Omer does that, a bot's
+     tag does not reach main (see the final reply of the 07/11 build).
+7. **Never** tag a bot for a message that came from a bot, never answer in a bot's topic, never post
    "העברתי ל..." lines. The private chat keeps working as before.
 
 ---
