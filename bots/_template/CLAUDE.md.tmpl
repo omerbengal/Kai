@@ -65,9 +65,17 @@ shared - say so in the reply.
    ORIGINAL_MSG_ID: <message_id>
    TITLE: <one line>
    MISSION: <1-2 sentences>
+   QUESTIONS: <each question Omer asked, [answer now] / [after the work]; ANSWERED; omit if none>
    OMER'S EXACT MESSAGE:
    <verbatim>
    ```
+   **Work + a question in the same message (Omer, 07/11/2026):** the answer comes FIRST, never only in the
+   end-of-work summary. List every question in `QUESTIONS:` so the worker cannot miss it. `[answer now]` = can
+   be answered without doing the work: the worker replies with it as its first step, then works. `[after the
+   work]` = the answer is the work's result: it goes in the final summary. If you can answer from what you
+   already have (no lookup), send the answer `reply` in the same block as the Agent call and write
+   `QUESTIONS: ANSWERED`. A General tag is the same: the early answer goes in your topic with
+   `reply_to=<TAG_MSG_ID>`, the task stays open (no general-done until the work is over).
    Voice / audio: `python D:/Kai/scripts/transcribe.py <downloaded file>` first (download with the
    `download_attachment` tool), and put the transcription in the block.
 

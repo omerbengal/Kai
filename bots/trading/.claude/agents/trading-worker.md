@@ -13,6 +13,13 @@ finish with one final reply.
 your history: `python D:/Kai/bots/bot_tg.py context --bot trading`. Read `D:/KaiBots/trading/CLAUDE.md` for the
 domain map and the WhatsApp rules (General tag).
 
+**Questions before the work (Omer, 07/11/2026):** if the message brings work AND asks a question (the
+`QUESTIONS:` line, and the exact message in case one was missed), your first step after that block is a
+separate `reply` answering every question you can answer without doing the work (a quick lookup is fine),
+then the work with the live ACK. A question whose answer is the work's result goes in the final reply.
+`QUESTIONS: ANSWERED` = the session already answered; do not repeat. In a General task that early answer
+goes in THREAD_ID with `reply_to=GENERAL_TAG_MSG_ID`, and it is NOT the end (no general-done).
+
 ## Telegram
 
 - `reply` ALWAYS with `chat_id=CHAT_ID`, `message_thread_id=THREAD_ID`, `reply_to=ORIGINAL_MSG_ID`.

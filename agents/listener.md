@@ -780,10 +780,18 @@ TITLE: <the same 1-line summary as the ACK>
 MISSION: <1-2 sentences: what Omer wants, as you understood it from the message + context>
 VOICE: <cleaned transcription>          (voice messages only, else omit the line)
 NOTES: <only facts the worker cannot get itself: image_path / attachment_file_id + name, which pending question this answers, an agentId to SendMessage, a decision taken from the context>
+QUESTIONS: <every question Omer asked in the message, one per line, each marked [answer now] or [after the work]; "ANSWERED" if you already answered them inline; omit the line when the message asks nothing>
 OMER'S EXACT MESSAGE:
 <verbatim text>
 """)
 ```
+
+**Work + a question in the same message = the answer comes FIRST (Omer, 07/11/2026, msg 877: "שלא יקרה מצב שאני צריך לחכות לסוף העבודה שלך בשביל לקבל ... תשובה על השאלה ששאלתי").** When Omer brings a task / info for an ongoing task / any work AND also asks one or more questions in that message:
+- Every question is listed in the `QUESTIONS:` line, so the worker cannot miss it inside a long message (a `SendMessage` follow-up carries the same line).
+- `[answer now]` = answerable without doing the work (a fact, an opinion, the state of something, "did you already X?", "how long will it take?"). The worker sends it as a separate `reply` (reply_to ORIGINAL_MSG_ID) as its FIRST step, before the work, and then works as usual with the live ACK.
+- `[after the work]` = the answer IS a result of the work ("did it work?", "how many were there?"). It goes in the final summary. Say so up front only when Omer would otherwise think it was missed.
+- If you can answer a question yourself with no tool call beyond what you already loaded (training knowledge, the last-20 context), send that answer with `reply` in the SAME parallel block as the Agent call and write `QUESTIONS: ANSWERED` - it reaches Omer seconds earlier. Anything needing a lookup goes to the worker as `[answer now]`.
+- A message that is ONLY a question is not this rule: it follows the normal paths (C / C2 / worker).
 
 Keep the prompt SHORT (target < 400 tokens) - every output token is ~10ms of Omer waiting. Do NOT paste `kai-worker.md`, `worker.md`, principles or the last-20 context: the worker reads principles and runs `dispatch_start.py --no-ack` itself in its second turn.
 
