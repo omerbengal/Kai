@@ -28,6 +28,7 @@ Usage:
 Output (stdout):
     ACK_MSG_ID=<id>            (or ACK_MSG_ID=FAILED -> fall back to the reply tool; or NONE with --no-ack)
     PENDING=none               (or PENDING=<n> followed by one "  msg_id=..: question" line each)
+    OPEN_BUTTONS=none          (or OPEN_BUTTONS=<n> + "  chat=.. msg=..: ...question tail [label | label]")
     CONTEXT:
     [ts] direction: text[:120]   x20
 
@@ -73,6 +74,25 @@ def print_pending():
     print(f"PENDING={len(pending)}")
     for q in pending:
         print(f"  msg_id={q.get('asked_at_msg_id')}: {q.get('question')}")
+
+
+def print_open_buttons():
+    """Open questions with buttons (07/11/2026, scripts/button_registry.py): if this message answers one
+    (a reply to it, or by content), the dispatcher closes it: button_registry.py close ... --chosen."""
+    try:
+        import button_registry
+        rows = button_registry.list_open()
+    except Exception as e:
+        print(f"OPEN_BUTTONS=error {e}")
+        return
+    if not rows:
+        print("OPEN_BUTTONS=none")
+        return
+    print(f"OPEN_BUTTONS={len(rows)}")
+    for r in rows[:8]:
+        labels = " | ".join(button_registry.label_core(b["text"]) for b in button_registry.buttons(r["keyboard"]))
+        text = (r["text"] or "").replace("\n", " ").replace("‏", "")[-100:]
+        print(f"  chat={r['chat_id']} msg={r['message_id']}: ...{text} [{labels}]")
 
 
 def print_context(limit):
@@ -143,7 +163,7 @@ def main():
         args.text = f"🔄 {args.title} — {status}"
 
     # Group (General topic, 06/11/2026): its ids collide with private ones -> no messages / ack_log row
-    # (stale_ack.py edits ack_log ids in the private chat). Pin is private-only too (tg_pin).
+    # (stale_ack.py edits ack_log ids in the private chat). Pin works in both (tg_pin is per chat since 07/11/2026).
     private = str(args.chat_id) == "${KAI_TELEGRAM_CHAT_ID}"
     mid = None
     if args.no_ack:
@@ -174,12 +194,13 @@ def main():
             log_ack(mid, "sent", args.text)
         except Exception as e:
             print(f"dispatch_start: ack_log failed: {e}", file=sys.stderr)
-    if mid and args.pin and private:
+    if mid and args.pin:
         tg_pin.pin_ack(mid, args.chat_id)  # best-effort, never raises
 
     if args.no_context:
         return
     print_pending()
+    print_open_buttons()
     print_context(args.context)
 
 

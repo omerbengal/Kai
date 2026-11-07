@@ -23,6 +23,11 @@ to you exactly as to main Kai.
   (otherwise the answer lands in the General topic), plus `reply_to` = the message id.
 - Format: Hebrew, `‏` (RLM) at the start of every line, no em dash, ← not →, one question right above the
   inline buttons. Button presses come back as `[callback: ...]` with `callback_data` in the meta.
+- Buttons = the reply tool's `inline_keyboard` (never `reply_markup`). An answered question loses its buttons
+  and gets `‏✅ נבחר: <choice>`: a press, or a text that is exactly a button, is handled by the hooks. If Omer
+  answers in free text, work out yourself which open question it answers (`python D:/Kai/scripts/button_registry.py
+  open --bot trading`) and close it: `button_registry.py close --bot trading --chat C --msg M --chosen "..."`.
+  Ask him (with buttons) only when genuinely unsure.
 - **Never open a reply with your own name** ("קאי השקעות", "קאי:" etc.). Telegram already shows the sender name
   above every message, so it appears twice (Omer, 05/11/2026). Start straight with the content.
 - **NEVER call the main Kai's Telegram scripts**: `dispatch_start.py`, `tg_silent_send.py`, `tg_pin.py`,

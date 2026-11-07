@@ -417,3 +417,8 @@ if __name__ == "__main__":
         stale_ack.fix_stale()
     except Exception as e:  # a cosmetic safety net must never fail the heartbeat
         print(f"stale_ack error: {e}")
+    try:  # 07/11/2026: a pin left by a dead worker (private, group, domain bots) is cleared after 3h
+        import tg_pin
+        tg_pin.sweep_stale()
+    except Exception as e:
+        print(f"tg_pin sweep error: {e}")

@@ -48,6 +48,22 @@ def handle_outgoing(data):
 
     for message_id, row_text in outgoing_rows(text, tool_input.get("files") or [], json.dumps(tool_response)):
         save_message(message_id, "outgoing", row_text)
+    _buttons("on_outgoing", tool_input, json.dumps(tool_response))
+
+
+def _buttons(fn, *args):
+    """Open-buttons registry (07/11/2026): record a reply sent with inline_keyboard / close a question
+    Omer answered. Never breaks the hook."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import button_registry
+        getattr(button_registry, fn)(*args)
+    except Exception as e:
+        try:
+            with open("D:/Kai/tmp/button_registry_errors.log", "a", encoding="utf-8") as f:
+                f.write(f"{datetime.now(timezone.utc).isoformat()} {fn}: {e}\n")
+        except Exception:
+            pass
 
 
 def parse_sent_ids(response_str):
@@ -100,6 +116,7 @@ def handle_incoming(data):
     channel_match = re.search(r"<channel([\s\S]*?)>([\s\S]*?)</channel>", prompt)
     if not channel_match:
         return  # Not a Telegram message, nothing to save
+    _buttons("on_incoming", prompt)
 
     attrs_str = channel_match.group(1)
     text = channel_match.group(2).strip()

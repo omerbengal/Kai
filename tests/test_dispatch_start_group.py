@@ -33,3 +33,18 @@ def test_group_auto_ack_edit_no_rows(monkeypatch):
 def test_private_keeps_rows(monkeypatch):
     c = run(monkeypatch, ["--reply_to", "5", "--title", "x"])
     assert c["save"] == [321] and c["log"] == [321]
+
+
+def test_group_pin_goes_to_group(monkeypatch):
+    """07/11/2026 (Omer msg 605): --pin in the group pins there (it used to be private-only)."""
+    pins = []
+    monkeypatch.setattr(D.tg_pin, "pin_ack", lambda m, c: pins.append((m, c)))
+    run(monkeypatch, ["--chat_id", GEN, "--ack_id", "606", "--title", "x", "--pin"])
+    assert pins == [(606, GEN)]
+
+
+def test_private_pin_unchanged(monkeypatch):
+    pins = []
+    monkeypatch.setattr(D.tg_pin, "pin_ack", lambda m, c: pins.append((m, c)))
+    run(monkeypatch, ["--reply_to", "5", "--title", "x", "--pin"])
+    assert pins == [(321, "${KAI_TELEGRAM_CHAT_ID}")]

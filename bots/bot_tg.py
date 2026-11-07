@@ -147,6 +147,20 @@ def hook_save(bot, mode, data, db_path=DB_PATH):
         for i, mid in enumerate(ids):
             save(bot, "outgoing", ti.get("chat_id"), ti.get("message_thread_id"), mid,
                  ti.get("text", "") if i == 0 else f"[part {i + 1}]", None, None, db_path)
+        if db_path is None:  # tests pass their own db: no registry, no Telegram calls
+            _buttons("on_outgoing", ti, json.dumps(data.get("tool_response", {})), bot)
+    if mode == "incoming" and db_path is None:
+        _buttons("on_incoming", data.get("prompt", "") or data.get("content", ""), bot)
+
+
+def _buttons(fn, *args):
+    """Open-buttons registry (scripts/button_registry.py, 07/11/2026): this bot's questions with buttons
+    live in its own bot.db; a press / an answer removes the buttons + adds the "✅ נבחר" line."""
+    try:
+        import button_registry
+        getattr(button_registry, fn)(*args)
+    except Exception as e:
+        print(f"[bot_tg] buttons {fn} failed: {e}", file=sys.stderr)
 
 
 def context(bot, n=20, db_path=DB_PATH):
@@ -368,8 +382,19 @@ def _set_tag(bot, tag, **fields):
     return t
 
 
+def _pin(cmd, bot, chat, msg):
+    """pin / unpin a bot ACK through scripts/tg_pin.py with this bot's token. Never raises."""
+    try:
+        sys.path.insert(0, "D:/Kai/scripts")
+        import tg_pin
+        (tg_pin.pin_ack if cmd == "pin" else tg_pin.unpin_ack)(msg, chat, bot=bot)
+    except Exception:
+        pass
+
+
 def drop_ack(bot, chat, ack_id):
-    """Delete a bot ACK: deleteMessage + end its typing task + drop its bot_messages row (= the `delete` CLI)."""
+    """Delete a bot ACK: unpin + deleteMessage + end its typing task + drop its bot_messages row (= the `delete` CLI)."""
+    _pin("unpin", bot, chat, ack_id)
     try:
         api(bot, "deleteMessage", chat_id=chat, message_id=ack_id)
     finally:
@@ -856,12 +881,19 @@ def main(argv):
         except ValueError as e:
             print(f"[bot_tg] {e}")
             return 2
-    if cmd in ("delete", "pin", "unpin"):
+    if cmd in ("pin", "unpin"):
+        # 07/11/2026: through scripts/tg_pin.py (this bot's token, its own registry key) so a finished ACK
+        # re-pins the bot's newest live one and the heartbeat clears pins left by a dead worker.
         chat, msg = _arg(argv, "--chat"), _arg(argv, "--msg")
-        method = {"delete": "deleteMessage", "pin": "pinChatMessage", "unpin": "unpinChatMessage"}[cmd]
-        extra = {"disable_notification": "true"} if cmd == "pin" else {}
+        _pin(cmd, bot, chat, msg)
+        print("ok")
+        return 0
+    if cmd == "delete":
+        chat, msg = _arg(argv, "--chat"), _arg(argv, "--msg")
+        _pin("unpin", bot, chat, msg)  # every ACK delete unpins first; a no-op when it was not pinned
+        method = "deleteMessage"
         try:
-            print(json.dumps(api(bot, method, chat_id=chat, message_id=msg, **extra)))
+            print(json.dumps(api(bot, method, chat_id=chat, message_id=msg)))
         except Exception as e:
             print(f"[bot_tg] {method} failed: {e}")
         if cmd == "delete":

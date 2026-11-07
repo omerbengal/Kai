@@ -80,6 +80,17 @@ def _save_bot(bot, cfg, chat, thread, mid, text, reply_to):
         pass
 
 
+def _register_buttons(bot, chat, mid, text, keyboard, post_fn):
+    """Open-buttons registry (07/11/2026): an answered question loses its buttons. Never raises."""
+    if not keyboard or post_fn is not _REAL_POST:  # tests inject a fake post: no registry
+        return
+    try:
+        import button_registry
+        button_registry.register(chat, mid, text, keyboard, bot=bot, source="topic_send")
+    except Exception as e:
+        sys.stderr.write(f"[topic_send] button registry failed: {e}\n")
+
+
 def _payload(chat, text, thread=None, reply_to=None, keyboard=None):
     p = {"chat_id": chat, "text": text}
     if thread:
@@ -89,6 +100,9 @@ def _payload(chat, text, thread=None, reply_to=None, keyboard=None):
     if keyboard:
         p["reply_markup"] = {"inline_keyboard": keyboard}
     return p
+
+
+_REAL_POST = post
 
 
 def send(domain, text, reply_to=None, keyboard=None, post=post, private_reply_to=None):
@@ -104,6 +118,7 @@ def send(domain, text, reply_to=None, keyboard=None, post=post, private_reply_to
         try:
             mid = post(token, _payload(chat, text, thread, reply_to, keyboard))
             _save_bot(domain, cfg, chat, thread, mid, text, reply_to)
+            _register_buttons(domain, chat, mid, text, keyboard, post)
             return mid, "topic"
         except Exception as e:
             sys.stderr.write(f"[topic_send] {domain} topic send failed, falling back to private: {e}\n")
@@ -118,4 +133,5 @@ def send(domain, text, reply_to=None, keyboard=None, post=post, private_reply_to
         tg_log.save_outgoing(mid, text)
     except Exception:
         pass
+    _register_buttons("main", OMER_CHAT, mid, text, keyboard, post)
     return mid, "private"

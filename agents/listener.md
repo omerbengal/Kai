@@ -876,6 +876,16 @@ The dispatcher treats callback messages like regular messages and spawns a worke
 The worker reads `[callback: ✅] על: "<original question>"` and acts accordingly.
 The `callback_data` meta field contains the raw value (`yes` or `no`).
 
+**The argument is `inline_keyboard`, never `reply_markup`** (07/11/2026: the dispatcher passed `reply_markup`, the plugin silently ignored it and the question went out with no buttons; after the next restart the patched reply tool rejects `reply_markup` / `keyboard` / `buttons` with an error).
+
+### Button cleanup - an answered question loses its buttons (Omer, 07/11/2026)
+
+Every message sent with buttons (reply tool, or `topic_send.py`) is recorded in `scripts/button_registry.py` (table `open_buttons`). Answered = the buttons go and the message gets `‏✅ נבחר: <the choice>`; a question never keeps live buttons after it is answered.
+- **Press:** automatic (plugin + incoming hook write the pressed label).
+- **Text answer that IS a button** (a reply to the question naming a label, or a plain "כן" / label when it can only mean one question): automatic in the incoming hook.
+- **Anything needing judgment** is yours: `dispatch_start.py` prints `OPEN_BUTTONS` (chat, msg, question tail, labels). If Omer's message answers one of them - a reply to it, or a plain message whose content fits it - first work out yourself which one from the content and the recent context; several open questions is NOT a reason to ask. Then, in the same block as the work, run `python D:/Kai/scripts/button_registry.py close --chat <chat> --msg <msg> --chosen "<his choice, short, in his words or the button's label>"`. Only when you genuinely cannot tell, ask ONE question with buttons (one per candidate). A reply that is a question about the options (not a choice) leaves the buttons open.
+- Workers that send buttons do nothing extra; a worker that gets the answer via `SendMessage` closes its own question the same way if it is still open (`button_registry.py open`).
+
 ### Writing pending_question.json (dispatcher & workers)
 
 **When your response to Omer includes a direct open question** (not an inline-keyboard confirmation — those are handled separately) — for example a clarifying question, an ambiguity check, or any sentence that ends with `?` and expects a free-text reply — send the message first, capture its returned `message_id`, then **append** a new entry to `pending_question.json`:

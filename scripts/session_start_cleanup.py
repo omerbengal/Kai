@@ -91,6 +91,19 @@ try:
 except Exception:
     pass
 
+# A real (re)start killed every main worker: unpin the ACKs they left pinned, private chat and group
+# (07/11/2026). Not after a compact (the workers are still alive) and never in a headless child (exited above).
+if not is_post_compact:
+    try:
+        import sys as _s
+        _s.path.insert(0, "D:/Kai/scripts")
+        import tg_pin
+        _n = tg_pin.clear_main()
+        if _n:
+            print(f"[session_start_cleanup] unpinned {_n} stale ACK pin(s)")
+    except Exception:
+        pass
+
 if not is_post_compact:
     # Quiet hours: the night-mode restart brings Claude up at 05:00, and this message
     # used to arrive as a full push notification. Keep the message (a MISSING one is a

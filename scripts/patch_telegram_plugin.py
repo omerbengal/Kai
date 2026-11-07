@@ -235,6 +235,61 @@ KAI_CONFIRM_PATCH = """\
   }"""
 
 
+# --- Button cleanup patch (07/11/2026, General msgs 596/599) ---
+# 1. A press used to rewrite the question as "<text>\n\n<raw callback_data>" (e.g. "kai_avatar_set_group").
+#    Now: "<text>\n\n‏✅ נבחר: <pressed button's label>" (buttons removed, as before). The registry hook
+#    (scripts/button_registry.py) writes the same line again with the original formatting.
+# 2. The reply tool rejects reply_markup / keyboard / buttons: on 07/11 the dispatcher passed reply_markup,
+#    the plugin silently ignored it and the question went out with no buttons. Buttons = inline_keyboard.
+# Neither marker is part of _server_is_patched (that check decides whether a RUNNING plugin is healthy).
+BUTTON_CHOSEN_MARKER = "kaiBtnChosen"
+BUTTON_CHOSEN_ANCHOR = (
+    "      await bot.api.editMessageText(chatId, msgId, `${originalText}\\n\\n${responseText}`)"
+    ".catch(() => {})\n"
+)
+BUTTON_CHOSEN_PATCH = (
+    "      // kaiBtnChosen: the pressed button's label, not the raw callback_data\n"
+    "      const kbRows = ((cq.message as { reply_markup?: { inline_keyboard?: Array<Array<{ text?: string,"
+    " callback_data?: string }>> } } | undefined)?.reply_markup?.inline_keyboard ?? [])\n"
+    "      const pressed = kbRows.flat().find(b => b.callback_data === data)\n"
+    "      const chosenLabel = ((pressed?.text ?? responseText).replace(/^[^\\p{L}\\p{N}_]+/u, '').trim())"
+    " || responseText\n"
+    "      await bot.api.editMessageText(chatId, msgId,"
+    " `${originalText}\\n\\n\\u200f\\u2705 \\u05e0\\u05d1\\u05d7\\u05e8: ${chosenLabel}`).catch(() => {})\n"
+)
+REPLY_ARGS_GUARD_MARKER = "kaiReplyArgsGuard"
+REPLY_ARGS_GUARD_ANCHOR = "        const format = (args.format as string | undefined) ?? 'text'\n"
+REPLY_ARGS_GUARD_PATCH = (
+    REPLY_ARGS_GUARD_ANCHOR
+    + "        for (const k of ['reply_markup', 'keyboard', 'buttons']) { // kaiReplyArgsGuard\n"
+    "          if (args[k] != null) throw new Error(`reply: unknown argument '${k}' - buttons go in"
+    " inline_keyboard: [[{text, callback_data}]]`)\n"
+    "        }\n"
+)
+
+
+def patch_button_cleanup(path: str) -> bool:
+    with open(path, "r", encoding="utf-8") as f:
+        content = f.read()
+    changed = False
+    if BUTTON_CHOSEN_MARKER not in content:
+        if content.count(BUTTON_CHOSEN_ANCHOR) != 1:
+            print(f"[patch_telegram] button_chosen anchor missing or not unique in {path}", file=sys.stderr)
+        else:
+            content = content.replace(BUTTON_CHOSEN_ANCHOR, BUTTON_CHOSEN_PATCH, 1)
+            changed = True
+    if REPLY_ARGS_GUARD_MARKER not in content:
+        if content.count(REPLY_ARGS_GUARD_ANCHOR) != 1:
+            print(f"[patch_telegram] reply_args_guard anchor missing or not unique in {path}", file=sys.stderr)
+        else:
+            content = content.replace(REPLY_ARGS_GUARD_ANCHOR, REPLY_ARGS_GUARD_PATCH, 1)
+            changed = True
+    if changed:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+    return changed
+
+
 # --- Poll give-up on 409 patch (investigation #035) ---
 # The poll loop gave up permanently after 8 consecutive 409 Conflicts (~28s of
 # cumulative backoff). But a force-killed old poller keeps Telegram's getUpdates
@@ -748,6 +803,10 @@ def main():
         inline_kb_applied = patch_inline_keyboard(path)
         verb3 = "patched" if inline_kb_applied else "already patched"
         print(f"[patch_telegram] inline_keyboard {verb3}: {path}", file=sys.stderr)
+
+        btn_applied = patch_button_cleanup(path)
+        print(f"[patch_telegram] button_cleanup {'patched' if btn_applied else 'already patched'}: {path}",
+              file=sys.stderr)
 
         poll_giveup_applied = patch_poll_giveup(path)
         verb4 = "patched" if poll_giveup_applied else "already patched"
