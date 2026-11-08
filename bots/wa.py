@@ -15,6 +15,7 @@ CLI (WhatsApp bot only):
 import io
 import json
 import os
+import re
 import sqlite3
 import sys
 import urllib.request
@@ -78,10 +79,38 @@ def alias_of(jid, config_path=kai_bots.CONFIG):
 
 
 def _fmt_ts(ts):
-    try:
-        return datetime.fromisoformat(str(ts)).strftime("%d/%m %H:%M")
+    t = str(ts)
+    try:  # the bridge writes its own sends with 7 fraction digits (12:07:11.0386795+02:00), py3.9 takes max 6
+        t = re.sub(r"(\.\d{6})\d+", r"", t)
+        return datetime.fromisoformat(t).strftime("%d/%m %H:%M")
     except Exception:
         return str(ts)
+
+
+def chat_jids(jid, device_db=None):
+    """Every JID of the same private chat: the phone JID and its LID twin (bridge whatsmeow_lid_map).
+
+    08/11/2026: a contact that migrated to a LID keeps a NAMED phone-JID chat holding only Kai's own
+    sends, while every reply of hers lands in an unnamed <lid>@lid chat. Reading one JID alone said "no reply"
+    while she had answered all 3 questions. Groups / newsletters are returned as is."""
+    user, _, server = (jid or "").partition("@")
+    if server not in ("s.whatsapp.net", "lid") or not user:
+        return [jid]
+    out = [jid]
+    try:
+        dev = sqlite3.connect(f"file:{device_db or WA_DEVICE_DB}?mode=ro", uri=True, timeout=5)
+        try:
+            if server == "lid":
+                rows = dev.execute("SELECT pn FROM whatsmeow_lid_map WHERE lid=?", (user,)).fetchall()
+                out += [f"{r[0]}@s.whatsapp.net" for r in rows if r[0]]
+            else:
+                rows = dev.execute("SELECT lid FROM whatsmeow_lid_map WHERE pn=?", (user,)).fetchall()
+                out += [f"{r[0]}@lid" for r in rows if r[0]]
+        finally:
+            dev.close()
+    except Exception:
+        pass
+    return list(dict.fromkeys(out))
 
 
 def _sender_names(conn, senders):
@@ -160,12 +189,13 @@ def _rows_to_msgs(conn, rows):
     return msgs
 
 
-def read(chat, limit=50, since_hours=None, db_path=None, config_path=kai_bots.CONFIG):
+def read(chat, limit=50, since_hours=None, db_path=None, config_path=kai_bots.CONFIG, device_db=None):
     jid, name = resolve_chat(chat, db_path, config_path)
     limit = max(1, min(int(limit or 50), 300))
-    q = ("SELECT content, sender, timestamp, is_from_me, media_type, chat_jid FROM messages WHERE chat_jid=?"
-         " AND ((content IS NOT NULL AND content != '') OR media_type IS NOT NULL)")
-    args = [jid]
+    jids = chat_jids(jid, device_db)
+    q = ("SELECT content, sender, timestamp, is_from_me, media_type, chat_jid FROM messages WHERE chat_jid IN"
+         f" ({','.join('?' * len(jids))}) AND ((content IS NOT NULL AND content != '') OR media_type IS NOT NULL)")
+    args = list(jids)
     if since_hours:
         since = datetime.now(timezone.utc) - timedelta(hours=float(since_hours))
         q += " AND datetime(timestamp) >= datetime(?)"
@@ -183,7 +213,7 @@ def read(chat, limit=50, since_hours=None, db_path=None, config_path=kai_bots.CO
     return {"chat": name, "jid": jid, "count": len(msgs), "messages": msgs}
 
 
-def search(query, chat=None, limit=30, db_path=None, config_path=kai_bots.CONFIG):
+def search(query, chat=None, limit=30, db_path=None, config_path=kai_bots.CONFIG, device_db=None):
     if not (query or "").strip():
         raise WaError("empty query")
     q = ("SELECT content, sender, timestamp, is_from_me, media_type, chat_jid FROM messages"
@@ -192,8 +222,9 @@ def search(query, chat=None, limit=30, db_path=None, config_path=kai_bots.CONFIG
     jid = name = None
     if chat:
         jid, name = resolve_chat(chat, db_path, config_path)
-        q += " AND chat_jid=?"
-        args.append(jid)
+        jids = chat_jids(jid, device_db)
+        q += f" AND chat_jid IN ({','.join('?' * len(jids))})"
+        args.extend(jids)
     q += " ORDER BY datetime(timestamp) DESC LIMIT ?"
     args.append(max(1, min(int(limit or 30), 200)))
     conn = _db(db_path)
