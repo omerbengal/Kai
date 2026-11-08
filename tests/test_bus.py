@@ -34,6 +34,10 @@ class FakeWa:
         FakeWa.sent.append((chat, text))
         return {"sent": True}
 
+    @staticmethod
+    def verify_sent(chat, text):
+        return {"verified": True, "chars": len(text)}
+
 
 def setup(monkeypatch, tmp_path):
     cfgp = tmp_path / "bots.json"
@@ -232,3 +236,70 @@ def test_wa_send_media_payload(tmp_path):
     assert seen["body"]["message"] == "שלום"
     wa.send_media("1@g.us", str(img), "", sign=True, opener=opener)
     assert seen["body"]["message"] == wa.SIGNATURE
+
+
+# 08/11/2026 (Tal, Vienna plan): a quote inside --text split the shell argument, 468 of 2109 chars went out,
+# and the bot still reported "נשלחה".
+def test_draft_refuses_text_split_by_shell_quotes():
+    import pytest
+    # what `--text "...לחפש "דירת מלון" עם מטבחון"` turns into in argv
+    argv = ["bus.py", "draft", "--from", "whatsapp", "--chat", "tal", "--text", "לבישול בחדר: לחפש דירת",
+            "מלון", "עם מטבחון", "--summary", "x"]
+    with pytest.raises(bus.BusError) as e:
+        bus.check_draft_argv(argv)
+    assert "--text-file" in str(e.value)
+    bus.check_draft_argv(["bus.py", "draft", "--from", "whatsapp", "--chat", "tal", "--text", "a b", "--summary", "x"])
+    bus.check_draft_argv(["bus.py", "draft", "--from", "w", "--chat", "c", "--file", "a.png", "--caption", "x",
+                          "--file", "b.png", "--caption", "y", "--summary", "s"])
+
+
+def test_draft_text_file_keeps_long_text_with_quotes(monkeypatch, tmp_path, capsys):
+    db, posts = setup(monkeypatch, tmp_path)
+    monkeypatch.setattr(bus, "BUS_DB", db)
+    monkeypatch.setenv("KAI_BOT", "whatsapp")
+    long_text = ("לבישול בחדר: לחפש \"דירת מלון\" עם מטבחון.\n\n" + "שורה ארוכה של תוכנית 'וינה' 🇦🇹\n" * 120).strip()
+    f = tmp_path / "plan.txt"
+    f.write_text(long_text, encoding="utf-8")
+    bus.main(["bus.py", "draft", "--from", "whatsapp", "--chat", "staff", "--text-file", str(f), "--summary", "x"])
+    out = json.loads(capsys.readouterr().out)
+    assert out["text"] == long_text and out["chars"] == len(long_text) > 3000
+    c = bus.conn(db)
+    assert json.loads(c.execute("SELECT payload_json FROM requests").fetchone()[0])["text"] == long_text
+
+
+def test_partial_send_is_failed_not_done(monkeypatch, tmp_path):
+    db, posts = setup(monkeypatch, tmp_path)
+
+    class Truncated(FakeWa):
+        @staticmethod
+        def verify_sent(chat, text):
+            raise wa.WaError("post-send check failed: WhatsApp holds 488 chars, approved text is 2130 chars")
+
+    rid, _ = bus.create("whatsapp", "wa_send", {"chat": "staff", "text": "היי"}, "x", db)
+    c = bus.conn(db)
+    c.execute("UPDATE requests SET status='new', approval_id='t' WHERE id=?", (rid,))
+    c.commit()
+    bus.serve_once(db, Truncated)
+    row = c.execute("SELECT status, error FROM requests WHERE id=?", (rid,)).fetchone()
+    assert row["status"] == "failed" and "488" in row["error"]
+
+
+def test_wa_verify_sent_compares_whole_text(tmp_path):
+    import sqlite3
+    import pytest
+    p = tmp_path / "m.db"
+    c = sqlite3.connect(p)
+    c.execute("CREATE TABLE messages (id TEXT, chat_jid TEXT, content TEXT, timestamp TEXT, is_from_me BOOLEAN)")
+    full = "תוכנית מלאה\n" * 50
+    c.execute("INSERT INTO messages VALUES ('1','<email>',?, '2026-11-08 16:48', 1)",
+              (wa.with_signature(full[:400]),))
+    c.commit()
+    with pytest.raises(wa.WaError) as e:
+        wa.verify_sent("9@g.us", full, db_path=str(p), tries=2, sleep=lambda s: None)
+    c.execute("UPDATE messages SET chat_jid='9@g.us'")
+    c.commit()
+    with pytest.raises(wa.WaError):
+        wa.verify_sent("9@g.us", full, db_path=str(p), tries=1, sleep=lambda s: None)
+    c.execute("INSERT INTO messages VALUES ('2','9@g.us',?, '2026-11-08 16:49', 1)", (wa.with_signature(full),))
+    c.commit()
+    assert wa.verify_sent("9@g.us", full, db_path=str(p), tries=1, sleep=lambda s: None)["verified"]

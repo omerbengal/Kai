@@ -269,6 +269,35 @@ def send(jid, text, opener=urllib.request.urlopen):
     return {"sent": True, "bridge": str(data.get("message", ""))[:200]}
 
 
+def verify_sent(jid, text, db_path=None, tries=8, sleep=None, device_db=None):
+    """Prove the bridge stored exactly `text` (signed) as one of our own last messages in this chat.
+
+    08/11/2026 (Tal, Vienna plan): the bot reported "נשלחה" while only 488 of 2109 chars reached her.
+    A send is reported done only after messages.db holds the same text. Raises WaError otherwise."""
+    import time as _t
+    sleep = sleep or _t.sleep
+    expected = with_signature(text)
+    jids = chat_jids(jid, device_db)
+    seen = []
+    for i in range(max(1, tries)):
+        try:
+            conn = _db(db_path)
+            try:
+                seen = [r[0] or "" for r in conn.execute(
+                    f"SELECT content FROM messages WHERE is_from_me=1 AND chat_jid IN ({','.join('?' * len(jids))})"
+                    " ORDER BY timestamp DESC LIMIT 5", jids).fetchall()]
+            finally:
+                conn.close()
+        except sqlite3.Error:
+            seen = []
+        if any(s.strip() == expected.strip() for s in seen):
+            return {"verified": True, "chars": len(expected)}
+        if i < tries - 1:
+            sleep(1)
+    got = len(seen[0]) if seen else 0
+    raise WaError(f"post-send check failed: WhatsApp holds {got} chars, approved text is {len(expected)} chars")
+
+
 MEDIA_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp")
 
 

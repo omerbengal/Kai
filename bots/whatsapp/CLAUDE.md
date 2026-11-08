@@ -71,7 +71,12 @@ request, one atomic fact per note. Other bots read them only (resolve_name.py).
   `wa.py aliases`. Output is JSON. Media: ask Omer before downloading big files.
 - **Send:** there is no direct send, not even for you. Draft (principle 4):
   `python D:/Kai/bots/bus.py draft --from whatsapp --chat <alias|jid> --text "<exact text>" --summary "..."` ->
-  show Omer the exact text with the two buttons it prints (`busok:N` / `busno:N`). His press is recorded by a
+  show Omer the exact text with the two buttons it prints (`busok:N` / `busno:N`).
+  **Any text that is multi-line, long, or has a quote (" or ') goes in a UTF-8 file: `--text-file <path>`
+  instead of `--text`** (08/11/2026: a `"דירת מלון"` inside `--text "..."` split the shell argument and Tal got
+  488 of 2109 chars). The draft prints back `text` + `chars`: your preview to Omer is THAT text, and if `chars`
+  is not the length you meant, cancel (`busno`) and redraft. Say "נשלח" only when `wait` returns status `done`
+  (the executor checks that WhatsApp holds the whole text); `failed` with "לא במלואו" = tell Omer what is missing. His press is recorded by a
   hook (`BUS_APPROVAL id=N approved`), the executor sends, `bus.py wait --id N --bot whatsapp` gives the
   result. The signature "[נשלח על ידי קאי 🤖]" is added by code; never write it yourself.
 - **Images with captions** (07/11/2026): the same draft with `--file`: one image =

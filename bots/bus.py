@@ -20,7 +20,9 @@ requests.notified_* columns make every post happen at most once.
 CLI (models; bots/guard.py makes sure --from / --bot is the calling bot itself):
   bus.py read   --from B --chat <alias|jid|name> [--limit 50] [--since-hours 24] --summary "..." [--timeout 120]
   bus.py search --from B --query <text> [--chat C] [--limit 30] --summary "..."
-  bus.py draft  --from B --chat C --text "<exact text>" --summary "..."   -> REQUEST_ID, busok:N / busno:N
+  bus.py draft  --from B --chat C --text "<exact text>" | --text-file <utf-8 path> --summary "..."  -> REQUEST_ID,
+                busok:N / busno:N, and the stored text + chars (the preview Omer approves). A stray argv token
+                (text split by a quote) is refused. A send is "done" only after wa.verify_sent finds the whole text.
   bus.py draft  --from B --chat C --file <image> [--text "<caption>"] --summary "..."     one image + caption
   bus.py draft  --from B --chat C --file P1 --caption C1 --file P2 --caption C2 ... --summary "..."  (max 10,
                 sent in this order; jpg/jpeg/png/gif/webp; signature only under the last one)
@@ -282,7 +284,12 @@ def execute(row, wa_mod=None):
     if row["kind"] == "wa_send":
         if not row["approval_id"]:
             raise BusError("no approval recorded - refusing to send")
-        return dict(wa_mod.send(p["chat"], p["text"]), chat=p.get("chat_name"))
+        res = wa_mod.send(p["chat"], p["text"])
+        try:  # 08/11/2026: "done" only when WhatsApp holds the whole approved text
+            check = wa_mod.verify_sent(p["chat"], p["text"])
+        except Exception as e:
+            raise BusError(f"נשלח אבל לא במלואו / לא אומת - לא לדווח 'נשלח' ({e})")
+        return dict(res, chat=p.get("chat_name"), verified=check.get("chars"))
     if row["kind"] == "wa_send_media":
         if not row["approval_id"]:
             raise BusError("no approval recorded - refusing to send")
@@ -438,6 +445,32 @@ def parse_media_args(argv):
     return items
 
 
+DRAFT_VALUE_FLAGS = ("--from", "--chat", "--text", "--text-file", "--summary", "--file", "--caption", "--timeout")
+
+
+def check_draft_argv(argv):
+    """Refuse a draft whose text was split by shell quoting.
+
+    08/11/2026 (Tal, Vienna plan): `--text "...לחפש "דירת מלון" עם..."` - the inner quotes closed the shell
+    string, argv got the text cut at 'לחפש דירת' plus stray words, and 468 of 2109 chars were sent.
+    Every token after the command must be a known flag or that flag's value."""
+    i = 2
+    while i < len(argv):
+        a = argv[i]
+        if a in DRAFT_VALUE_FLAGS:
+            i += 2
+            continue
+        raise BusError(f"stray argument {a[:40]!r}: the text was split by shell quoting (a quote inside --text?)."
+                       " Write the text to a UTF-8 file and pass --text-file <path>")
+    if "--text" in argv and "--text-file" in argv:
+        raise BusError("pass --text or --text-file, not both")
+
+
+def read_text_file(path):
+    with open(path, encoding="utf-8-sig") as f:
+        return f.read().strip()
+
+
 def _single_instance():
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
@@ -493,10 +526,14 @@ def main(argv):
                 payload = {"query": _arg(argv, "--query"), "chat": _arg(argv, "--chat"),
                            "limit": int(_arg(argv, "--limit", 30))}
                 kind = "wa_search"
-            elif "--file" in argv:
+            else:
+                check_draft_argv(argv)
+                if "--text-file" in argv:
+                    argv = list(argv) + ["--text", read_text_file(_arg(argv, "--text-file"))]
+            if cmd == "draft" and "--file" in argv:
                 payload = {"chat": _arg(argv, "--chat"), "items": parse_media_args(argv)}
                 kind = "wa_send_media"
-            else:
+            elif cmd == "draft":
                 text = _arg(argv, "--text")
                 if not (text or "").strip():
                     raise BusError("--text is required")
@@ -505,7 +542,9 @@ def main(argv):
             rid, p = create(frm, kind, payload, _arg(argv, "--summary", kind))
             if cmd == "draft":
                 out = {"request_id": rid, "chat": p.get("chat_name"), "status": "draft",
-                       "items": p.get("items"),
+                       "items": p.get("items"), "text": p.get("text"),
+                       "chars": len(p.get("text") or ""),
+                       "check": "the preview you show Omer is THIS text; if chars differ from your text, cancel",
                        "buttons": [{"text": "✅ שלח", "callback_data": f"busok:{rid}"},
                                    {"text": "❌ בטל", "callback_data": f"busno:{rid}"}],
                        "next": "show Omer the exact text + these buttons; after BUS_APPROVAL approved run wait"}
