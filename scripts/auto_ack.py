@@ -168,14 +168,23 @@ def direct_bot_tag(attrs, content, usernames=None):
     return min(hits)[1] if hits else None
 
 
+def mentions_main(content):
+    """Omer (or a bot) @mentioned main Kai by name. A reply to a bot's message that tags main is main's, not
+    the bot's (08/11/2026, General msg 1029 "הלו @Nova..." replying to the WhatsApp bot's 1027)."""
+    return f"@{MAIN_USERNAME}".lower() in (content or "").lower()
+
+
 def bot_owned(attrs, content):
-    """('direct_bot_tag' | 'reply_to_bot', bot) when Omer's General message belongs to a domain bot, else None.
-    Shared with typing_session_start.py, so no main-Kai typing task opens for it. Never raises."""
+    """('direct_bot_tag' | 'reply_to_bot' | 'bot_chatter', bot) when a General message is not main's work, else
+    None. Shared with typing_session_start.py, so no main-Kai typing task opens for it. Never raises."""
     try:
+        sender = bot_sender(attrs)
+        if sender:
+            return None if mentions_main(content) else ("bot_chatter", sender)
         tag = direct_bot_tag(attrs, content)
         if tag:
             return ("direct_bot_tag", tag)
-        owner = bot_reply_owner(attrs)
+        owner = None if mentions_main(content) else bot_reply_owner(attrs)
         if owner:
             return ("reply_to_bot", owner)
     except Exception:
@@ -328,7 +337,7 @@ def handle(prompt, dry_run=False):
                          f" (Omer tagged {tagged} directly; that bot receives it itself: do NOTHING, no"
                          " reply, no ACK, no tag)")
             continue
-        owner = None if from_bot else bot_reply_owner(attrs)
+        owner = None if from_bot or mentions_main(content) else bot_reply_owner(attrs)
         if owner:
             lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=NONE reason=reply_to_bot BOT={owner}"
                          f" (Omer is answering {owner}'s message; that bot receives it itself: do NOTHING, no"

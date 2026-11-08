@@ -54,14 +54,16 @@ row. This section replaces Step −2 / Step shortening for these messages:
 4. **"מה הבוט עשה?" / anything about a bot's work** (in General OR the private chat): read it, never guess -
    `python D:/Kai/scripts/general_handoff.py history --bot <name> [--n 40]` prints the bot's recent
    messages from its own `bot.db` (every reply, question and summary it sent, and what Omer wrote it).
-   Main Kai never receives the bots' Telegram messages as prompts (no loop, no extra turns; Omer msg 22595).
+   Main Kai acts on a bot's General message only when it tags main (`ask --to main`, item 6); every other bot
+   line is `reason=bot_chatter` = do nothing, no typing (no loop; Omer msg 22595).
 5. **Omer answering a bot in General (07/11/2026, Omer msgs 781 / 791).** A bot that is stuck / failed /
    unsure / needs a decision asks Omer IN General, tagging him (`bot_tg.py general-ask`), and a buttons
    question it leaves in its topic is nudged in General after 2 min unanswered. His answer is the bot's, never
    main's:
    - `AUTO_ACK ... reason=reply_to_bot BOT=<name>` = he replied to that bot's General message (question,
      nudge, summary line). Telegram delivers it to that bot itself: do NOTHING (no ACK was sent, no reply, no
-     tag, no reaction).
+     tag, no reaction). NOT when his message tags main Kai (`@Nova_PersonalAssistant_Bengi_bot`): that is
+     main's task with a normal ACK, and the bot's hook ignores it (`reason=main_tag`). 08/11/2026, msg 1029.
    - `AUTO_ACK ... reason=direct_bot_tag BOT=<name>` = he @mentioned that domain bot himself (usernames from
      config/bots.json; not when main is tagged too). The bot receives it and owns it: do NOTHING - no ACK, no
      reply, no tag, no reaction, no typing (the typing hook skips it too). 07/11/2026, msgs 916 / 921.
@@ -84,8 +86,11 @@ row. This section replaces Step −2 / Step shortening for these messages:
      delete, a payment, someone else's calendar, killing a busy session) waits for Omer: ask him in General,
      tagging nobody else, with buttons.
    - `reason=bot_chatter` (a bot's General line that does not tag main) / `reason=bot_rate_limit` = do NOTHING.
-   - Main's access.json must let the bots' ids into General for these to arrive; until Omer does that, a bot's
-     tag does not reach main (see the final reply of the 07/11 build).
+   - Delivery needs BOTH the bots' ids in main's General `allowFrom` (done 07/11) AND Bot-to-Bot Communication
+     on for main's own bot in BotFather: without it Telegram seems to hand main a bot's message only when it replies
+     to a main message (962 / 965 / 1027 were lost, 1004 a reply got through; 08/11/2026). Safety net:
+     `bot_tg.main_ask_due` (heartbeat) - a request with no main ACK after 3 min gets ONE line in General
+     tagging Omer, as a reply to the request; his reply there tagging main reaches main as a normal task.
 7. **Never** tag a bot for a message that came from a bot, never answer in a bot's topic, never post
    "העברתי ל..." lines. The private chat keeps working as before.
 

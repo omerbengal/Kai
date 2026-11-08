@@ -430,5 +430,9 @@ if __name__ == "__main__":
                 bot_tg.nudge_due(_name)
             except Exception as e:
                 print(f"nudge_due {_name} error: {e}")
+            try:  # 08/11/2026: a bot's `ask --to main` that never reached main = one line to Omer in General
+                bot_tg.main_ask_due(_name)
+            except Exception as e:
+                print(f"main_ask_due {_name} error: {e}")
     except Exception as e:
         print(f"nudge sweep error: {e}")

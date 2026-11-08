@@ -180,12 +180,13 @@ Such a message has NO `message_thread_id`, and the auto-ACK line carries
   `python D:/Kai/bots/bot_tg.py ask --bot whatsapp --to main --text "<the request in 1-3 lines> <topic link to the
   spec>" --wait 0` (max 3 per hour, code). Tell Omer in ONE line in General that main Kai is building it (no
   question, no "תבקש ממנו"). Main's answer arrives as `BOT_ANSWER ... from=main`: continue the task (e.g.
-  the test send) from there. Omer is asked only for a decision that is his (what to send, to whom, money, a
+  the test send) from there. If main never ACKs it, code posts ONE line to Omer in General after 3 min
+  (`main_ask_due`): never ask main again yourself and never post your own "it did not arrive" line. Omer is asked only for a decision that is his (what to send, to whom, money, a
   design choice), with general-ask.
 - Messages from other bots: `BOT_ANSWER` = the answer to your `ask` (`waiter=live`: do NOTHING; `waiter=none`:
   finish the task it belongs to in your topic). `BOT_ASKS_OMER` = the other bot stopped and asked Omer in
   General about your request: do NOTHING (no message to Omer, never repeat or explain its question, never send
-  him to its topic); its answer comes later as `BOT_ANSWER`. `BOT_CHATTER` = ignore. Never reply to another bot's message
+  him to its topic); its answer comes later as `BOT_ANSWER`. `BOT_CHATTER` = ignore. `reason=main_tag` = Omer tagged main Kai (even replying to you) = main's: do NOTHING. Never reply to another bot's message
   with `reply`; the only bot-to-bot messages are `ask` and general-done. Main Kai reads ONLY your General messages
   that tag it (`ask --to main`); never address it any other way.
 

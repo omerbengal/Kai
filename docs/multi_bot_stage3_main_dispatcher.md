@@ -227,6 +227,25 @@ relay its spec to main Kai. Now the bot asks main Kai itself:
 - Tests: tests/test_bot_to_bot.py (ask --to main), tests/test_auto_ack.py (handoff / chatter / rate),
   tests/test_allow_bot_handoffs.py.
 
+### 6.1 Lost tags (08/11/2026, General msgs 962 / 965 / 1027)
+
+The WhatsApp bot's three `ask --to main` tags never reached main, although access.json already had the bots'
+ids: main's transcripts show the only bot message main ever got was 1004, a trading reply TO a main message.
+Most likely cause: Telegram gives a bot other bots' messages only with Bot-to-Bot Communication on for the RECEIVING bot (it was
+turned on for the three domain bots, not for main). Fix:
+- Omer turns on Bot-to-Bot Communication for @Nova_PersonalAssistant_Bengi_bot in BotFather (only he can).
+  Main then also receives the bots' chatter; auto_ack answers it with `reason=bot_chatter` and `bot_owned`
+  now returns ("bot_chatter", bot) so main opens no typing for it.
+- Safety net, code: `bot_tg.main_ask_due(bot)` (heartbeat, every minute). A request to main with no main ACK
+  (`acked`, recorded by the bot's hook on main's 🔄 ⏳) and no answer after 3 min (and under 6 h) gets ONE
+  General line from the bot tagging Omer, replying to the request, with the request text. Never twice
+  (`lost_alert` on the request).
+- Omer's reply to a bot's message that tags main is main's: scripts/auto_ack.py no longer says
+  `reply_to_bot` for it (msg 1029 "הלו @Nova..." was told "do NOTHING"), and the bot's own hook answers it
+  with `reason=main_tag` (do nothing, no typing) unless he tagged that bot too.
+- Tests: tests/test_auto_ack.py (reply that tags main, bot_chatter typing), tests/test_bot_to_bot.py
+  (main_ask_due, main_tag, bot typing).
+
 Also 07/11 (Omer msg 852): Omer's General answers that got 👀 are tracked on the tag (`answers`) and turn 👍
 when the tag is closed (general-done), stops again (general-ask / general-wait / react 🤔), or the bot replies
 with a plain `reply` in General (PostToolUse safety net `settle_on_general_reply`). Tests:

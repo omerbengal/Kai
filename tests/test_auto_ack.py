@@ -312,3 +312,26 @@ def test_typing_hook_opens_no_lease_for_bot_tag(monkeypatch):
         monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps({"prompt": ch(text, chat_id=GEN)})))
         typing_session_start.main()
         assert len(opened) == expect, text
+
+
+# --- Omer tagging main Kai while replying to a bot's message (08/11/2026, General msgs 1027 / 1029) -----------
+def test_reply_to_bot_that_tags_main_is_mains(tmp_path, monkeypatch):
+    sent = _no_live(monkeypatch, tmp_path, owner="whatsapp")
+    out = auto_ack.handle(ch(f"הלו @{auto_ack.MAIN_USERNAME}", chat_id=GEN, message_id="1029",
+                             reply_to_message_id="1027"))
+    assert sent == [("🔄 ⏳", "1029")] and "reply_to_bot" not in out[0] and "AUTO_ACK_MSG_ID=88" in out[0]
+
+
+def test_bot_owned_none_for_reply_to_bot_that_tags_main(monkeypatch):
+    monkeypatch.setattr(auto_ack, "bot_reply_owner", lambda attrs: "whatsapp")
+    a, c = auto_ack.parse_channels(ch(f"@{auto_ack.MAIN_USERNAME} תטפל", chat_id=GEN, reply_to_message_id="1027"))[0]
+    assert auto_ack.bot_owned(a, c) is None
+    a, c = auto_ack.parse_channels(ch("תטפל", chat_id=GEN, reply_to_message_id="1027"))[0]
+    assert auto_ack.bot_owned(a, c) == ("reply_to_bot", "whatsapp")
+
+
+def test_bot_chatter_opens_no_main_typing():
+    a, c = auto_ack.parse_channels(ch("סיכום", chat_id=GEN, user_id="9010629958"))[0]
+    assert auto_ack.bot_owned(a, c) == ("bot_chatter", "whatsapp")
+    a, c = auto_ack.parse_channels(ch(f"@{auto_ack.MAIN_USERNAME} בקשה", chat_id=GEN, user_id="9010629958"))[0]
+    assert auto_ack.bot_owned(a, c) is None

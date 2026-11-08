@@ -273,3 +273,56 @@ def test_main_reply_to_the_request_is_an_answer_not_a_task(bots):
     assert "BOT_ANSWER" in lines[0] and "from=main" in lines[0]
     assert bot_tg.load_requests("whatsapp")[rid]["state"] == "answered"
     assert "951" not in bot_tg.load_tags("whatsapp")
+
+
+# ---- 08/11/2026: a bot's tag of main that never arrived (msgs 962 / 965 / 1027) -----------------------------
+
+def test_main_ask_due_alerts_once_after_3_min(bots):
+    r = Rec()
+    out = bot_tg.ask("whatsapp", "main", "לעדכן את wa_policy", sender=r.send, reactor=r.react, wait=0)
+    rid = str(out["request_msg"])
+    ts = bot_tg.load_requests("whatsapp")[rid]["ts"]
+    a = Rec()
+    assert bot_tg.main_ask_due("whatsapp", now=ts + 60, sender=a.send) == []
+    assert bot_tg.main_ask_due("whatsapp", now=ts + 200, sender=a.send) == [rid]
+    s = a.sends[0]
+    assert s["reply_to"] == rid and s["thread"] is None and "לעדכן את wa_policy" in s["text"]
+    assert "@" + bot_tg.MAIN_USERNAME in s["text"] and s.get("entities")
+    assert bot_tg.main_ask_due("whatsapp", now=ts + 400, sender=a.send) == []   # once only
+
+
+def test_main_ask_due_quiet_when_main_acked(bots):
+    r = Rec()
+    out = bot_tg.ask("whatsapp", "main", "תבנה", sender=r.send, reactor=r.react, wait=0)
+    rid = str(out["request_msg"])
+    bot_tg.auto_ack("whatsapp", chan("950", MAIN_ID, "🔄 ⏳", reply_to=rid), sender=Rec().send, reactor=Rec().react)
+    ts = bot_tg.load_requests("whatsapp")[rid]["ts"]
+    assert bot_tg.main_ask_due("whatsapp", now=ts + 300, sender=Rec().send) == []
+
+
+def test_main_ask_due_ignores_bot_to_bot_and_old(bots):
+    r = Rec()
+    out = bot_tg.ask("whatsapp", "miluim", "x", sender=r.send, reactor=r.react, wait=0)
+    ts = bot_tg.load_requests("whatsapp")[str(out["request_msg"])]["ts"]
+    assert bot_tg.main_ask_due("whatsapp", now=ts + 300, sender=Rec().send) == []
+    out = bot_tg.ask("trading", "main", "y", sender=r.send, reactor=r.react, wait=0)
+    ts = bot_tg.load_requests("trading")[str(out["request_msg"])]["ts"]
+    assert bot_tg.main_ask_due("trading", now=ts + 7 * 3600, sender=Rec().send) == []
+
+
+def test_omer_tagging_main_in_reply_to_bot_is_not_the_bots(bots):
+    lines = bot_tg.auto_ack("whatsapp", chan("1029", "${KAI_TELEGRAM_CHAT_ID}", f"הלו @{bot_tg.MAIN_USERNAME}", reply_to="1027"),
+                            sender=Rec().send, reactor=Rec().react)
+    assert "reason=main_tag" in lines[0]
+    lines = bot_tg.auto_ack("whatsapp", chan("1030", "${KAI_TELEGRAM_CHAT_ID}",
+                                             f"@{bot_tg.MAIN_USERNAME} @<bot-username> תתאמו"),
+                            sender=Rec().send, reactor=Rec().react, dry_run=True)
+    assert "reason=main_tag" not in lines[0]
+
+
+def test_bot_typing_skips_omer_tag_of_main():
+    import bot_typing as bt
+    msg = chan("1029", "${KAI_TELEGRAM_CHAT_ID}", f"הלו @{bot_tg.MAIN_USERNAME}", reply_to="1027")
+    assert bt.parse_open(msg, GROUP, own_topic="121", own_username="kai__whatsapp_bot") is None
+    msg = chan("1031", "${KAI_TELEGRAM_CHAT_ID}", "@<bot-username> תשלח")
+    assert bt.parse_open(msg, GROUP, own_topic="121", own_username="kai__whatsapp_bot") == (GROUP, "121", "1031")

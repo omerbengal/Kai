@@ -1035,6 +1035,41 @@ def ask_wait(bot, rid, timeout=ASK_DEFAULT_WAIT, sleep=None, clock=None):
         sleep(2)
 
 
+MAIN_ASK_ALERT_S = 180          # a request to main with no ACK / answer after 3 min = it never arrived
+MAIN_ASK_ALERT_MAX_AGE_S = 6 * 3600
+
+
+def main_ask_due(bot, now=None, sender=None):
+    """Safety net (08/11/2026, General msgs 962 / 965 / 1027 sat unanswered for hours): a request this bot sent
+    main Kai (`ask --to main`) that got no ACK and no answer within 3 min never reached main. Telegram drops a
+    bot's tag of main unless main's own Bot-to-Bot mode is on. Post ONE line in General tagging Omer, as a
+    reply to the request, so a reply of his that tags main hands it over (auto_ack treats a reply that tags
+    main as main's). Run every minute by heartbeat.py. Returns the request ids alerted."""
+    sender = sender or send
+    now = now or datetime.now(timezone.utc).timestamp()
+    out = []
+    for rid, r in sorted(load_requests(bot).items()):
+        if r.get("to") != MAIN_NAME or r.get("state") != "waiting" or r.get("acked") or r.get("lost_alert"):
+            continue
+        age = now - float(r.get("ts", now))
+        if age < MAIN_ASK_ALERT_S or age > MAIN_ASK_ALERT_MAX_AGE_S:
+            continue
+        _update_request(bot, rid, lost_alert="sending")   # claim first: never two alerts for one request
+        req = (r.get("text") or "").strip().replace("\n", " ")
+        req = req[:300] + ("..." if len(req) > 300 else "")
+        body, ents = omer_text(f"הבקשה שלי לקאי הראשי לא הגיעה אליו ⚠️\n{RLM}{req}\n{RLM}כדי להעביר: תענה"
+                               f" להודעה הזו עם @{MAIN_USERNAME}")
+        try:
+            mid = sender(bot, r.get("chat") or kai_bots.bot(bot).get("group_id"), body, thread=None,
+                         reply_to=rid, entities=ents)
+        except Exception as ex:
+            print(f"[bot_tg] main_ask_due {rid} failed: {ex}", file=sys.stderr)
+            continue
+        _update_request(bot, rid, lost_alert=str(mid))
+        out.append(rid)
+    return out
+
+
 def _waiter_live(bot, rid):
     try:
         with open(_waiter_path(bot, rid), encoding="utf-8") as f:
@@ -1054,6 +1089,8 @@ def bot_inbound(bot, from_bot, attrs, content, reactor=None, dry_run=False):
     if req and req.get("to") == from_bot:
         body = (content or "").strip()
         if body in (TEXT_ACK, VOICE_ACK) or body.startswith("🔄"):
+            if not dry_run:
+                _update_request(bot, rt, acked=str(mid))   # the request arrived (main_ask_due stays quiet)
             return f"{head} reason=bot_ack (the other bot's ACK: nothing to do)"
         if attrs.get("message_thread_id"):
             if not dry_run:
@@ -1117,6 +1154,12 @@ def auto_ack(bot, prompt, dry_run=False, sender=None, reactor=None):
         kind, val = ack_classify(bot, attrs, content)
         if kind == "none" and val == "stranger":
             lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=NONE reason=stranger (ignore it, no reply)")
+            continue
+        if attrs.get("user_id") == OMER_ID and is_general(bot, attrs) and main_ack.mentions_main(content) \
+                and f"@{(kai_bots.bot(bot).get('username') or '').lower()}" not in (content or "").lower():
+            # 08/11/2026: Omer tagged main Kai (also when replying to this bot's message): main owns it
+            lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=NONE reason=main_tag (Omer tagged main"
+                         " Kai, not you: main handles it, do NOTHING, no reply, no ACK)")
             continue
         from_bot = bot_name_by_id(attrs.get("user_id"))
         if from_bot == bot:
