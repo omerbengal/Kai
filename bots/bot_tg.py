@@ -156,7 +156,8 @@ def hook_save(bot, mode, data, db_path=DB_PATH):
             _buttons("on_outgoing", ti, json.dumps(data.get("tool_response", {})), bot)
             if ti.get("inline_keyboard") and ti.get("message_thread_id") and ids[-1]:
                 try:  # a question with buttons in the topic: "waiting for you" in General after 2 min
-                    schedule_nudge(bot, ti.get("chat_id"), ti.get("message_thread_id"), ids[-1], ti.get("text", ""))
+                    qmsg = _keyboard_msg(ti, json.dumps(data.get("tool_response", {}))) or ids[-1]
+                    schedule_nudge(bot, ti.get("chat_id"), ti.get("message_thread_id"), qmsg, ti.get("text", ""))
                 except Exception as e:
                     print(f"[bot_tg] nudge schedule failed: {e}", file=sys.stderr)
             if not ti.get("message_thread_id") and ids[-1]:
@@ -165,7 +166,72 @@ def hook_save(bot, mode, data, db_path=DB_PATH):
                 except Exception as e:
                     print(f"[bot_tg] settle failed: {e}", file=sys.stderr)
     if mode == "incoming" and db_path is None:
-        _buttons("on_incoming", data.get("prompt", "") or data.get("content", ""), bot)
+        prompt = data.get("prompt", "") or data.get("content", "")
+        _buttons("on_incoming", prompt, bot)
+        try:
+            close_topic_question_on_answer(bot, prompt)
+        except Exception as e:
+            print(f"[bot_tg] topic answer close failed: {e}", file=sys.stderr)
+
+
+def _keyboard_msg(tool_input, response_str):
+    """The message that carries the buttons (not a photo sent after it): button_registry.keyboard_message_id."""
+    try:
+        import button_registry
+        return button_registry.keyboard_message_id(tool_input, response_str)[0]
+    except Exception:
+        return None
+
+
+def _question_thread(bot, chat, msg, db_path=DB_PATH):
+    try:
+        conn = _conn(db_path, bot)
+        r = conn.execute("SELECT thread_id FROM bot_messages WHERE bot=? AND direction='outgoing' AND chat_id=?"
+                         " AND telegram_message_id=? ORDER BY id DESC LIMIT 1",
+                         (bot, str(chat), int(msg))).fetchone()
+        conn.close()
+        return str(r[0]) if r and r[0] not in (None, "") else None
+    except Exception:
+        return None
+
+
+def close_topic_question_on_answer(bot, prompt, api=None, db_path=DB_PATH, reg_db=None):
+    """Omer writes (text or voice) in the bot's own topic after a buttons question there = he answered it
+    (09/11/2026, General msg 1367: a voice answer left the buttons open). The newest open question in that
+    topic loses its buttons and gets "✅ נבחר: ענית בהודעה...". A text that is itself a question ("?") is
+    about the options, not a choice: the buttons stay. A press is button_registry.on_incoming's job.
+    Returns the closed message id, or None."""
+    import button_registry
+    m = re.search(r"<channel([\s\S]*?)>([\s\S]*?)</channel>", prompt or "")
+    if not m:
+        return None
+    attrs, body = m.group(1), m.group(2).strip()
+
+    def attr(n):
+        a = re.search(rf'\b{n}="(.*?)"', attrs, re.DOTALL)
+        return a.group(1) if a else None
+    chat, msg, thread = attr("chat_id"), attr("message_id"), attr("message_thread_id")
+    if attr("callback_data") is not None or body.startswith("[callback:"):
+        return None
+    if attr("user_id") != OMER_ID or not chat or not msg or not thread:
+        return None
+    if str(thread) != str(own_topic(bot)) or str(chat) != str(kai_bots.bot(bot).get("group_id")):
+        return None
+    kind = attr("attachment_kind")
+    voice = kind in ("voice", "audio") or body.startswith("(voice message)")
+    if not voice and body.rstrip().endswith("?"):
+        return None
+    for e in button_registry.list_open(chat, bot, reg_db):
+        if int(e["message_id"]) >= int(msg) or _question_thread(bot, chat, e["message_id"], db_path) != str(thread):
+            continue
+        if voice:
+            chosen = "ענית בהודעה קולית 🎤"
+        else:
+            snip = re.sub(r"\s+", " ", body).strip()
+            chosen = "ענית בהודעה: " + (snip if len(snip) <= 40 else snip[:40].rstrip() + "...")
+        button_registry.close(chat, e["message_id"], chosen, bot, api=api, db=reg_db)
+        return e["message_id"]
+    return None
 
 
 def _buttons(fn, *args):
@@ -552,11 +618,15 @@ def question_answered(bot, q, e, db_path=DB_PATH):
     for v in load_tags(bot).values():
         if v.get("question") == str(q) and v.get("state") != "waiting":
             return True
-    try:
+    try:  # any message in the topic after the question: a later id, or a later row (a button press is
+        # saved under the QUESTION's own id, so "id > q" alone missed it - 09/11/2026, miluim 1422/1426)
         conn = _conn(db_path, bot)
+        row = conn.execute("SELECT MAX(id) FROM bot_messages WHERE bot=? AND direction='outgoing' AND chat_id=?"
+                           " AND telegram_message_id=?", (bot, e["chat"], int(q))).fetchone()
+        qrow = row[0] if row and row[0] is not None else 10 ** 12
         n = conn.execute("SELECT COUNT(*) FROM bot_messages WHERE bot=? AND direction='incoming' AND chat_id=?"
-                         " AND thread_id=? AND telegram_message_id>?",
-                         (bot, e["chat"], e["thread"], int(q))).fetchone()[0]
+                         " AND thread_id=? AND (telegram_message_id>? OR id>?)",
+                         (bot, e["chat"], e["thread"], int(q), qrow)).fetchone()[0]
         conn.close()
         if n:
             return True

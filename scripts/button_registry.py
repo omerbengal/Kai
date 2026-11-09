@@ -356,13 +356,13 @@ def on_incoming(prompt, bot="main", api=None, db=None):
     return None
 
 
-def on_outgoing(tool_input, response_str, bot="main", db=None):
-    """PostToolUse on reply: record a message sent with inline_keyboard.
-
-    The plugin puts the keyboard on the LAST text chunk; files go out after the text."""
-    kb = (tool_input or {}).get("inline_keyboard")
-    if not buttons(kb):
-        return None
+def keyboard_message_id(tool_input, response_str):
+    """(message id that carries the buttons, number of text chunks) for a reply sent with inline_keyboard,
+    or (None, 0). The plugin puts the keyboard on the LAST text chunk; files go out after the text, so the
+    last sent id is a photo when files are attached (09/11/2026: the miluim nudge watched photo 1423 while
+    the buttons were on 1422, and nagged Omer after he had pressed one)."""
+    if not buttons((tool_input or {}).get("inline_keyboard")):
+        return None, 0
     ids = []
     m = re.search(r"sent \(id: (\d+)\)", response_str or "")
     if m:
@@ -372,12 +372,22 @@ def on_outgoing(tool_input, response_str, bot="main", db=None):
         if m:
             ids = [int(x) for x in re.findall(r"\d+", m.group(1))]
     if not ids:
-        return None
+        return None, 0
     n_files = min(len(tool_input.get("files") or []), len(ids))
     n_text = len(ids) - n_files
     if n_text < 1:
+        return None, 0
+    return ids[n_text - 1], n_text
+
+
+def on_outgoing(tool_input, response_str, bot="main", db=None):
+    """PostToolUse on reply: record a message sent with inline_keyboard.
+
+    The plugin puts the keyboard on the LAST text chunk; files go out after the text."""
+    kb = (tool_input or {}).get("inline_keyboard")
+    mid, n_text = keyboard_message_id(tool_input, response_str)
+    if mid is None:
         return None
-    mid = ids[n_text - 1]
     text = tool_input.get("text") if n_text == 1 else None  # a split text: we do not know the last chunk
     pm = "markdownv2" if (tool_input.get("format") or "").lower() == "markdownv2" else None
     register(tool_input.get("chat_id"), mid, text, kb, bot, pm, "reply_tool", db)

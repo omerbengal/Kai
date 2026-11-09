@@ -342,3 +342,87 @@ def test_plain_reply_in_topic_or_without_answers_touches_nothing(bots):
     assert bot_tg.settle_on_general_reply("whatsapp", GROUP, 900, reactor=r.react) == []   # fresh tag, no answers
     assert bot_tg.settle_on_general_reply("whatsapp", "${KAI_TELEGRAM_CHAT_ID}", 900, reactor=r.react) == []
     assert r.reacts == [] and bot_tg.load_tags("whatsapp")["751"]["state"] == "working"
+
+
+# ---- 09/11/2026: miluim nudged Omer 2 min after he pressed a button (General msg 1426) ---------------------
+# The reply had a photo: buttons on text 1422, photo 1423. The nudge watched 1423, and the press is saved
+# under 1422 (the question's own id), so neither "registry closed" nor "a later id in the topic" saw it.
+
+def test_buttons_with_a_photo_nudge_the_text_message_not_the_photo(bots, monkeypatch):
+    monkeypatch.setattr(bot_tg, "_buttons", lambda *a, **k: None)
+    calls = []
+    monkeypatch.setattr(bot_tg, "schedule_nudge", lambda *a, **k: calls.append(a))
+    data = {"tool_input": {"chat_id": GROUP, "message_thread_id": "117", "text": "לפרוס?",
+                           "files": ["C:/x/shot.png"], "inline_keyboard": [[{"text": "כן", "callback_data": "y"}]]},
+            "tool_response": {"content": [{"type": "text", "text": "sent 2 parts (ids: 650, 651)"}]}}
+    bot_tg.hook_save("trading", "outgoing", data)
+    assert calls and calls[0][3] == 650
+
+
+def test_a_press_saved_under_the_question_id_counts_as_an_answer(bots):
+    bot_tg.save("trading", "outgoing", GROUP, "117", 650, "לפרוס?")
+    bot_tg.save("trading", "outgoing", GROUP, "117", 651, "[part 2]")
+    bot_tg.schedule_nudge("trading", GROUP, "117", 651, "לפרוס?", now=T0)  # even when keyed on the photo
+    bot_tg.save("trading", "incoming", GROUP, "117", 650, "[callback: y] על: לפרוס?")
+    e = bot_tg.load_nudges("trading")["651"]
+    assert bot_tg.question_answered("trading", "651", e)
+    r = Rec()
+    assert bot_tg.nudge_due("trading", now=T0 + 200, sender=r.send, claim=lambda *a: True) == []
+    assert r.sends == []
+
+
+def test_sent_nudge_leaves_open_questions_once_answered(bots):
+    bot_tg.save("trading", "outgoing", GROUP, "117", 650, "לפרוס?")
+    bot_tg.schedule_nudge("trading", GROUP, "117", 650, "לפרוס?", now=T0)
+    bot_tg.nudge_due("trading", now=T0 + 200, sender=Rec().send, answered=lambda *a: False, claim=lambda *a: True)
+    assert any(b == "trading" for b, _, _ in bot_tg.open_questions())
+    bot_tg.save("trading", "incoming", GROUP, "117", 650, "[callback: y] על: לפרוס?")
+    assert not any(b == "trading" for b, _, _ in bot_tg.open_questions())
+
+
+class FakeApi:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, method, **p):
+        self.calls.append((method, p))
+        return True
+
+
+def _open_q(bots, msg=650, thread="117"):
+    import button_registry
+    reg = os.path.join(bots["trading"]["home"], "bot.db")
+    bot_tg.save("trading", "outgoing", GROUP, thread, msg, "לפרוס?")
+    button_registry.register(GROUP, msg, "לפרוס?", [[{"text": "כן", "callback_data": "y"}]], "trading",
+                             None, "reply_tool", reg)
+    return button_registry, reg
+
+
+def test_voice_answer_in_the_topic_closes_the_buttons(bots):
+    br, reg = _open_q(bots)
+    api = FakeApi()
+    p = chan("655", OMER, "(voice message)", thread="117").replace(" ts=", ' attachment_kind="voice" ts=')
+    assert bot_tg.close_topic_question_on_answer("trading", p, api=api, reg_db=reg) == 650
+    e = br.get(GROUP, 650, "trading", reg)
+    assert e["status"] == "closed" and "קולית" in e["chosen"]
+    assert api.calls[0][0] == "editMessageReplyMarkup"
+
+
+def test_text_answer_closes_but_a_question_about_the_options_does_not(bots):
+    br, reg = _open_q(bots)
+    assert bot_tg.close_topic_question_on_answer("trading", chan("655", OMER, "מה ההבדל?", thread="117"),
+                                                 api=FakeApi(), reg_db=reg) is None
+    assert br.get(GROUP, 650, "trading", reg)["status"] == "open"
+    assert bot_tg.close_topic_question_on_answer("trading", chan("656", OMER, "תפרוס רק ל-19-20", thread="117"),
+                                                 api=FakeApi(), reg_db=reg) == 650
+    assert br.get(GROUP, 650, "trading", reg)["chosen"].startswith("ענית בהודעה: תפרוס")
+
+
+def test_topic_answer_close_ignores_presses_other_topics_and_other_senders(bots):
+    br, reg = _open_q(bots)
+    for p in (chan("655", OMER, "[callback: y] על: לפרוס?", thread="117", callback="y"),
+              chan("655", OMER, "כן", thread="121"),
+              chan("655", WA_ID, "כן", thread="117"),
+              chan("649", OMER, "כן", thread="117")):
+        assert bot_tg.close_topic_question_on_answer("trading", p, api=FakeApi(), reg_db=reg) is None
+    assert br.get(GROUP, 650, "trading", reg)["status"] == "open"
