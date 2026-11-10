@@ -90,7 +90,9 @@ def main():
         sys.exit(1)
 
     try:
-        save(message_id, args.text)
+        # Group ids (bots group General) collide with private ones: never a `messages` row for them
+        if not str(args.chat_id).strip().startswith("-"):
+            save(message_id, args.text)
     except Exception as e:
         # The message is out; a DB miss must not make the caller resend it.
         print(f"tg_silent_send: DB save failed: {e}", file=sys.stderr)

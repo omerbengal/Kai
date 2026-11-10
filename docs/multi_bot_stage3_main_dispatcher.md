@@ -146,6 +146,8 @@ Phase A (small, recommended first): General = router + simple answers.
 - Personal fast scripts (reminders, tasks, calendar, WhatsApp to a person) stay PRIVATE-ONLY in phase A: from
   General the dispatcher runs them with a worker that replies in General, or answers "את זה אני עושה בפרטי"
   with a button. No fast script runs from General in phase A, so none can answer in the wrong chat.
+  **Update 10/11/2026:** reminder and task fast scripts now run from General (`--chat_id <group>`, `_base.py`
+  is group-safe, see listener.md Step G item 3); calendar / WhatsApp / contacts fast scripts still go via a worker.
 - `messages` gets a `chat_id` column (NULL = private, as all old rows); every delete / lookup by
   `telegram_message_id` adds `AND IFNULL(chat_id,'${KAI_TELEGRAM_CHAT_ID}') = ?`. Test that fails on any script that deletes
   by id alone.

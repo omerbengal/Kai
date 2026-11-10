@@ -49,8 +49,15 @@ row. This section replaces Step −2 / Step shortening for these messages:
    reply / edit_message uses this chat_id and no message_thread_id; skip log_ack; before deleting the ACK unpin it
    with tg_pin.py unpin ACK_MSG_ID --chat_id <group-id>, then deleteMessage on this chat_id and do NOT delete
    its messages row (group ids collide with private ones)`, and `dispatch_map.py <agentId> ACK ORIG <group-id>`
-   (the chat_id makes the finish handler unpin/delete in the group, never the private message with that id). **No fast script (Option D) from General**, except the reminder update below; the worker does
-   the DB operation itself.
+   (the chat_id makes the finish handler unpin/delete in the group, never the private message with that id).
+   **Option D fast scripts DO run from General (10/11/2026, Omer General msg 1656 "אייג׳נט לתזכורת?!?")** for
+   reminders and tasks: `fast_reminder_create / _list / _update / _cancel / _delete`, `fast_task_create /
+   fast_tasks_list / fast_task_done / _update / _delete`. Same ONE call as Option D, with
+   `--ack_id <AUTO_ACK_MSG_ID> --orig_id <message_id> --chat_id <group-id>` (no dispatch_start, no pin, no
+   worker). `_base.py` replies in General, saves the reply only in `chat_messages`, deletes the General ACK and
+   never touches a private `messages` / ack_log row (tests: `tests/test_reminder_chat.py`
+   `test_fast_script_from_general_stays_in_general`, one per script). Every OTHER fast script (WhatsApp, calendar,
+   contacts, ...) is not verified in the group yet: worker path for those.
    **⏰ reminders fire IN General since 10/11/2026** (Omer General msg 1616; switch:
    `python D:/Kai/scripts/reminder_chat.py general|private|status`, config/reminder_chat.json). The ⏰ (and its
    contact card) is saved in `chat_messages` keyed by (chat_id, message id), never in `messages`. A 👍 on it in
@@ -58,6 +65,7 @@ row. This section replaces Step −2 / Step shortening for these messages:
    time** (`reply_to_message_text` starts with ⏰) = reschedule that exact reminder, ONE call, no worker:
    `python D:/Kai/scripts/fast/fast_reminder_update.py --reply_msg_id <reply_to_message_id> --local_at "YYYY-MM-DD HH:MM" --ack_id <AUTO_ACK_MSG_ID> --orig_id <message_id> --chat_id <group-id> &`
    (`_base.py` is group-safe: rows go to chat_messages, the ACK delete never touches a private row).
+   A NEW reminder asked in General ("תזכיר לי עוד 40 דק...") = `fast_reminder_create.py ... --chat_id <group-id>`, never a worker.
    Same in the private chat with `--chat_id ${KAI_TELEGRAM_CHAT_ID}` when the switch is on private.
 4. **"מה הבוט עשה?" / anything about a bot's work** (in General OR the private chat): read it, never guess -
    `python D:/Kai/scripts/general_handoff.py history --bot <name> [--n 40]` prints the bot's recent

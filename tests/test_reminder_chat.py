@@ -279,3 +279,85 @@ print(sent[0][0])
     conn = sqlite3.connect(db)
     assert conn.execute("SELECT trigger_at, status FROM reminders WHERE id=2").fetchone() == ("2026-11-11 10:00:00", "pending")
     assert conn.execute("SELECT trigger_at, status FROM reminders WHERE id=1").fetchone() == ("2026-11-10 08:00:00", "pending")
+
+
+# ---- Option D fast scripts allowed from General (10/11/2026, Omer General msg 1656) -------------
+# The dispatcher runs these with --chat_id <General>. Each must: reply in General, delete the General
+# ACK, save its reply only to chat_messages, and never touch a private `messages` / ack_log row.
+
+GENERAL_FAST = [
+    ("fast_reminder_create", ["--message", "להתקשר", "--trigger_at", "2030-01-01 10:00:00"]),
+    ("fast_reminder_list", ["--days", "30"]),
+    ("fast_reminder_update", ["--message", "לקנות חלב", "--trigger_at", "2030-01-02 10:00:00"]),
+    ("fast_reminder_cancel", ["--message", "לקנות חלב"]),
+    ("fast_reminder_delete", ["--message", "לקנות חלב"]),
+    ("fast_task_create", ["--title", "משימת בדיקה", "--priority", "5"]),
+    ("fast_tasks_list", ["--filter", "all"]),
+    ("fast_task_done", ["--title", "לתקן אופניים"]),
+    ("fast_task_update", ["--title", "לתקן אופניים", "--priority", "7"]),
+    ("fast_task_delete", ["--title", "לתקן אופניים"]),
+]
+
+
+@pytest.mark.parametrize("script,extra", GENERAL_FAST, ids=[s for s, _ in GENERAL_FAST])
+def test_fast_script_from_general_stays_in_general(tmp_path, script, extra):
+    db = str(tmp_path / "g.db")
+    conn = real_schema_db(db)
+    conn.execute("INSERT INTO reminders (message, trigger_at, status) VALUES ('לקנות חלב', '2030-01-01 08:00:00', 'pending')")
+    conn.execute("INSERT INTO tasks (title, priority, status) VALUES ('לתקן אופניים', 5, 'open')")
+    # private rows that share the ids used below: must survive untouched
+    conn.execute("INSERT INTO messages (telegram_message_id, direction, text) VALUES (5, 'outgoing', 'private ack')")
+    conn.execute("INSERT INTO messages (telegram_message_id, direction, text) VALUES (777, 'outgoing', 'private reply')")
+    conn.commit()
+    before = conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    ack_before = conn.execute("SELECT COUNT(*) FROM ack_log").fetchone()[0]
+    conn.close()
+    calls_file = str(tmp_path / "calls.json")
+    code = f"""
+import sys, json, urllib.request
+sys.path.insert(0, r'{SCRIPTS}'); sys.path.insert(0, r'{os.path.join(SCRIPTS, "fast")}')
+calls = []
+class R:
+    def __init__(self, body): self.b = body
+    def read(self): return self.b
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+def fake(req, *a, **k):
+    url = req if isinstance(req, str) else req.full_url
+    data = None if isinstance(req, str) else req.data
+    calls.append({{'url': url.split('/bot', 1)[-1].split('/', 1)[-1], 'data': data.decode('utf-8') if data else None}})
+    return R(json.dumps({{'ok': True, 'result': {{'message_id': 777}}}}).encode())
+urllib.request.urlopen = fake
+import _base
+_base.DB_PATH = r'{db}'
+_base.unpin_ack = lambda *a, **k: None
+_base.action_log = lambda *a, **k: None
+import {script} as m
+m.unpin_ack = _base.unpin_ack
+m.action_log = _base.action_log
+sys.argv = ['x'] + {extra!r} + ['--ack_id', '5', '--orig_id', '6', '--chat_id', '{G}']
+try:
+    m.main()
+finally:
+    json.dump(calls, open(r'{calls_file}', 'w', encoding='utf-8'), ensure_ascii=False)
+"""
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, encoding="utf-8",
+                         cwd=str(tmp_path))
+    assert out.returncode == 0, out.stderr
+    assert "fail:" not in out.stderr, out.stderr
+    calls = json.load(open(calls_file, encoding="utf-8"))
+    sends = [c for c in calls if c["url"].startswith("sendMessage")]
+    deletes = [c for c in calls if c["url"].startswith("deleteMessage")]
+    assert sends, calls
+    for c in sends:
+        assert json.loads(c["data"])["chat_id"] == G
+        assert "fast-script error" not in c["data"]
+    assert any(f"chat_id={G}" in c["url"] and "message_id=5" in c["url"] for c in deletes), deletes
+    assert not any(f"chat_id={P}" in c["url"] or f'"chat_id": "{P}"' in (c["data"] or "") for c in calls)
+    conn = sqlite3.connect(db)
+    assert conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == before
+    assert conn.execute("SELECT text FROM messages WHERE telegram_message_id=5").fetchone()[0] == "private ack"
+    assert conn.execute("SELECT COUNT(*) FROM ack_log").fetchone()[0] == ack_before
+    reminder_chat.ensure_table(conn)
+    assert conn.execute("SELECT COUNT(*) FROM chat_messages WHERE chat_id=? AND telegram_message_id=777",
+                        (G,)).fetchone()[0] == 1
