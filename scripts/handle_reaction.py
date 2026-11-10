@@ -19,6 +19,7 @@ from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from heartbeat import advance_recurring  # noqa: E402  (shared recurrence arithmetic)
+import reminder_chat  # noqa: E402  (chat_messages: group rows keyed by chat, 10/11/2026)
 
 DB_PATH = 'D:/Kai/kai.db'
 BOT_TOKEN = os.environ["KAI_TELEGRAM_BOT_TOKEN"]
@@ -108,7 +109,51 @@ def log_reaction(conn: sqlite3.Connection, message_id: int, emoji: str, action: 
     )
 
 
+def _group_entity(conn: sqlite3.Connection, row):
+    """('reminder'|'task', db row) linked to a chat_messages row, else (None, None)."""
+    if row['reminder_id']:
+        r = conn.execute("SELECT * FROM reminders WHERE id = ?", (row['reminder_id'],)).fetchone()
+        if r:
+            return 'reminder', r
+    if row['task_id']:
+        t = conn.execute("SELECT * FROM tasks WHERE id = ?", (row['task_id'],)).fetchone()
+        if t:
+            return 'task', t
+    return None, None
+
+
+def handle_group(message_id: int, reaction: str, chat_id: str, mode: str) -> None:
+    """A reaction in a group (the bots group's General): ONLY that chat's own chat_messages row counts.
+
+    Group message ids collide with private ones, so `messages` is never consulted here - before
+    10/11/2026 a 👍 in General could dismiss the private reminder that happened to share its id.
+    """
+    conn = get_connection()
+    try:
+        row = reminder_chat.get_row(conn, chat_id, message_id)
+        if row is None:
+            raise MessageNotFound(f'No chat_messages row for chat={chat_id} message_id={message_id}')
+        reactions = json.loads(row['reactions']) if row['reactions'] else []
+        if mode == 'add' and reaction not in reactions:
+            reactions.append(reaction)
+        elif mode == 'remove' and reaction in reactions:
+            reactions.remove(reaction)
+        conn.execute('UPDATE chat_messages SET reactions = ? WHERE id = ?',
+                     (json.dumps(reactions) if reactions else None, row['id']))
+        kind, ent = _group_entity(conn, row)
+        if kind == 'reminder':
+            _mark_reminder_by_row(conn, ent, 'dismissed' if mode == 'add' else 'fired')
+        elif kind == 'task':
+            _mark_task_by_row(conn, ent, 'done' if mode == 'add' else 'open')
+        log_action(conn, f'reaction_{mode}', f'chat={chat_id} msg={message_id} emoji={reaction}')
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def handle_add(message_id: int, reaction: str, chat_id: str) -> None:
+    if reminder_chat.is_group(chat_id):
+        return handle_group(message_id, reaction, chat_id, 'add')
     conn = get_connection()
     try:
         msg = lookup_message(conn, message_id)
@@ -122,6 +167,8 @@ def handle_add(message_id: int, reaction: str, chat_id: str) -> None:
 
 
 def handle_remove(message_id: int, reaction: str, chat_id: str) -> None:
+    if reminder_chat.is_group(chat_id):
+        return handle_group(message_id, reaction, chat_id, 'remove')
     conn = get_connection()
     try:
         msg = lookup_message(conn, message_id)

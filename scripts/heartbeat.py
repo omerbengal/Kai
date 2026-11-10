@@ -22,6 +22,10 @@ try:  # IPv4 first: IPv6 to api.telegram.org hangs ~80% of the time on this PC (
 except Exception:
     pass
 try:
+    import reminder_chat  # where ⏰ reminders fire (private / General), config/reminder_chat.json
+except Exception:
+    reminder_chat = None
+try:
     import local_tz  # home timezone: Israel, or the destination while travel mode is on
 except Exception:  # never let the tz helper stop reminders from firing
     local_tz = None
@@ -63,8 +67,12 @@ def _log_card_issue(conn, details):
         pass
 
 
-def _save_row(conn, tg_msg_id, text, link=None, reply_to=None):
+def _save_row(conn, tg_msg_id, text, link=None, reply_to=None, chat_id=None):
     if conn is None or not tg_msg_id:
+        return
+    if reminder_chat is not None and reminder_chat.is_group(chat_id):
+        # Group ids collide with private ones: the row goes to chat_messages, keyed by chat (10/11/2026)
+        reminder_chat.save_row(conn, chat_id, tg_msg_id, text, link=link, reply_to=reply_to)
         return
     try:
         conn.execute(
@@ -80,8 +88,11 @@ def _save_row(conn, tg_msg_id, text, link=None, reply_to=None):
         pass
 
 
-def send_telegram(text: str, conn=None, alert=False, link=None, card_label=None):
+def send_telegram(text: str, conn=None, alert=False, link=None, card_label=None, chat_id=None):
     """Send a Telegram message. If conn is provided, saves to messages table. Returns telegram message_id.
+
+    chat_id: default the private chat. A group chat (the bots group's General, for ⏰ reminders since
+    10/11/2026) posts there with no thread and saves its rows to chat_messages, never to `messages`.
 
     Phone numbers (scripts/phone_links.py, config/phone_links.json): mobile numbers are rewritten
     to +972-5X-XXX-XXXX (Telegram links them). A star code / landline in a single alert (alert=True)
@@ -90,6 +101,7 @@ def send_telegram(text: str, conn=None, alert=False, link=None, card_label=None)
     the text message. Every card row is saved with the same `link` (reminder_id / task_id) so a 👍
     on it marks the reminder done. Any card failure falls back to the plain text message.
     """
+    chat = str(chat_id) if chat_id else CHAT_ID
     plan = None
     try:
         import phone_links
@@ -107,11 +119,11 @@ def send_telegram(text: str, conn=None, alert=False, link=None, card_label=None)
         reasons = []
         for attempt in (1, 2):  # one retry: a single slow/failed call must not turn the card into text
             try:
-                data = _tg_api("sendContact", phone_links.contact_payload(CHAT_ID, c["number"], c["first"], c["last"]),
+                data = _tg_api("sendContact", phone_links.contact_payload(chat, c["number"], c["first"], c["last"]),
                                timeout=15)
                 tg_msg_id = data.get("result", {}).get("message_id")
                 if tg_msg_id:
-                    _save_row(conn, tg_msg_id, text, link)
+                    _save_row(conn, tg_msg_id, text, link, chat_id=chat)
                     if reasons:
                         _log_card_issue(conn, f"card sent on retry after: {reasons[0]} | {text[:60]}")
                     return tg_msg_id
@@ -125,10 +137,10 @@ def send_telegram(text: str, conn=None, alert=False, link=None, card_label=None)
         _log_card_issue(conn, f"card failed, sent as text: {' / '.join(reasons)} | {text[:60]}")
         plan = {"mode": "text", "text": plan["text"], "cards": []}
 
-    base_payload = {"chat_id": CHAT_ID, "text": text}
+    base_payload = {"chat_id": chat, "text": text}
     payload = base_payload
     if plan and plan["mode"] == "text":
-        payload = {"chat_id": CHAT_ID, "text": plan["text"]}
+        payload = {"chat_id": chat, "text": plan["text"]}
     elif plan and plan["mode"] == "legacy":  # dormant Mini App / dial-page path
         try:
             payload = phone_links.telegram_payload(base_payload)
@@ -142,14 +154,14 @@ def send_telegram(text: str, conn=None, alert=False, link=None, card_label=None)
             raise
         data = _tg_api("sendMessage", base_payload)  # never lose a reminder over a link
     tg_msg_id = data.get("result", {}).get("message_id")
-    _save_row(conn, tg_msg_id, text, link)
+    _save_row(conn, tg_msg_id, text, link, chat_id=chat)
     if tg_msg_id and plan and plan["mode"] == "text":
         for c in plan["cards"]:
             try:
                 r = _tg_api("sendContact", phone_links.contact_payload(
-                    CHAT_ID, c["number"], c["first"], c["last"], reply_to=tg_msg_id, silent=True))
+                    chat, c["number"], c["first"], c["last"], reply_to=tg_msg_id, silent=True))
                 cid = r.get("result", {}).get("message_id")
-                _save_row(conn, cid, f"[כרטיס חיוג להודעה {tg_msg_id}] {text}", link, reply_to=tg_msg_id)
+                _save_row(conn, cid, f"[כרטיס חיוג להודעה {tg_msg_id}] {text}", link, reply_to=tg_msg_id, chat_id=chat)
             except Exception as e:
                 why = _err_text(e)
                 phone_links.note_flood(why)
@@ -226,9 +238,25 @@ def run_heartbeat():
         )
         for rid, message, recurrence, trigger_at, series_at, nag_count, card_label in cur.fetchall():
             try:
-                tg_msg_id = send_telegram(f"⏰ {message}", conn=conn, alert=True,
-                                          link=("reminder_id", rid), card_label=card_label)
-                if tg_msg_id:
+                # Target chat: config/reminder_chat.json (scripts/reminder_chat.py general|private).
+                # A failed General send falls back to the private chat - a reminder is never lost.
+                r_chat = reminder_chat.reminder_chat_id() if reminder_chat is not None else CHAT_ID
+                try:
+                    tg_msg_id = send_telegram(f"⏰ {message}", conn=conn, alert=True,
+                                              link=("reminder_id", rid), card_label=card_label, chat_id=r_chat)
+                except Exception as ge:
+                    if r_chat == CHAT_ID:
+                        raise
+                    try:
+                        conn.execute("INSERT INTO action_log (agent, action, details) VALUES "
+                                     "('heartbeat', 'reminder_chat_fallback', ?)",
+                                     (f"reminder {rid} to {r_chat} failed, sent private: {_err_text(ge)}",))
+                    except Exception:
+                        pass
+                    r_chat = CHAT_ID
+                    tg_msg_id = send_telegram(f"⏰ {message}", conn=conn, alert=True,
+                                              link=("reminder_id", rid), card_label=card_label)
+                if tg_msg_id and r_chat == CHAT_ID:  # group rows are linked in chat_messages by _save_row
                     conn.execute(
                         "UPDATE messages SET reminder_id = ? WHERE telegram_message_id = ?",
                         (rid, tg_msg_id)

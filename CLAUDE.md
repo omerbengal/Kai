@@ -27,7 +27,8 @@ Multiple messages spawn multiple parallel workers — this is intentional and co
 SQLite. Always use Python's `sqlite3` module to query. Key tables:
 
 - **tasks** — title, priority (0–11), domain, due_at (UTC), status (open/done/cancelled)
-- **reminders** — message, trigger_at (UTC), recurrence (daily/weekly/monthly/yearly), status
+- **reminders** — message, trigger_at (UTC), recurrence (daily/weekly/monthly/yearly), status. Fired ⏰ go to the bots group's **General** since 10/11/2026 (`scripts/reminder_chat.py general|private|status`, back to private in one command; a failed General send falls back to private). 👍 there dismisses, a reply with a time reschedules (`fast_reminder_update.py --reply_msg_id`). Tests: `tests/test_reminder_chat.py`
+- **chat_messages** — rows of messages in a GROUP chat (the General ⏰ + contact cards, fast-script replies there), keyed by (chat_id, telegram_message_id). Group ids collide with private ones, so group rows never go into `messages` and nothing private reads this table
 - **people** — contacts with name, birthday, phone, telegram_username, email
 - **people_notes** — atomic facts about contacts (preferences, history, etc.)
 - **messages** — full Telegram message history (direction: incoming/outgoing)

@@ -49,8 +49,16 @@ row. This section replaces Step −2 / Step shortening for these messages:
    reply / edit_message uses this chat_id and no message_thread_id; skip log_ack; before deleting the ACK unpin it
    with tg_pin.py unpin ACK_MSG_ID --chat_id <group-id>, then deleteMessage on this chat_id and do NOT delete
    its messages row (group ids collide with private ones)`, and `dispatch_map.py <agentId> ACK ORIG <group-id>`
-   (the chat_id makes the finish handler unpin/delete in the group, never the private message with that id). **No fast script (Option D) from General**: they answer in the private chat only; the worker does
-   the DB operation itself. Reminders still fire in the private chat; say so when setting one.
+   (the chat_id makes the finish handler unpin/delete in the group, never the private message with that id). **No fast script (Option D) from General**, except the reminder update below; the worker does
+   the DB operation itself.
+   **⏰ reminders fire IN General since 10/11/2026** (Omer General msg 1616; switch:
+   `python D:/Kai/scripts/reminder_chat.py general|private|status`, config/reminder_chat.json). The ⏰ (and its
+   contact card) is saved in `chat_messages` keyed by (chat_id, message id), never in `messages`. A 👍 on it in
+   General dismisses it (handle_reaction.py reads only that chat's row). **Omer replies to a ⏰ in General with a
+   time** (`reply_to_message_text` starts with ⏰) = reschedule that exact reminder, ONE call, no worker:
+   `python D:/Kai/scripts/fast/fast_reminder_update.py --reply_msg_id <reply_to_message_id> --local_at "YYYY-MM-DD HH:MM" --ack_id <AUTO_ACK_MSG_ID> --orig_id <message_id> --chat_id <group-id> &`
+   (`_base.py` is group-safe: rows go to chat_messages, the ACK delete never touches a private row).
+   Same in the private chat with `--chat_id ${KAI_TELEGRAM_CHAT_ID}` when the switch is on private.
 4. **"מה הבוט עשה?" / anything about a bot's work** (in General OR the private chat): read it, never guess -
    `python D:/Kai/scripts/general_handoff.py history --bot <name> [--n 40]` prints the bot's recent
    messages from its own `bot.db` (every reply, question and summary it sent, and what Omer wrote it).
@@ -561,6 +569,8 @@ python D:/Kai/scripts/fast/fast_reminder_delete.py --message "[keyword]" --ack_i
 
 # Update reminder — at least one of --trigger_at / --new_message required; both allowed together
 # Reschedule: --local_at "YYYY-MM-DD HH:MM" (Omer's LOCAL time; --israel_time forces Israel). Legacy --trigger_at is UTC.
+# Reply to a fired ⏰ with a time: --reply_msg_id <reply_to_message_id> instead of --message (exact reminder);
+# in General (where ⏰ fire since 10/11/2026) --chat_id <group-id> - see Step G item 3.
 # Rename:     --new_message "new text"
 python D:/Kai/scripts/fast/fast_reminder_update.py --message "[keyword]" --local_at "YYYY-MM-DD HH:MM" --new_message "[new text]" --ack_id ACK_MSG_ID --orig_id ORIGINAL_MSG_ID --chat_id ${KAI_TELEGRAM_CHAT_ID} &
 

@@ -13,6 +13,9 @@ Usage:
   # Both:
   python fast_reminder_update.py --message "keyword" --new_message "new text" --trigger_at "YYYY-MM-DD HH:MM:SS" --ack_id N --orig_id N --chat_id ${KAI_TELEGRAM_CHAT_ID}
 
+  # Reply to a fired ⏰ (private OR the bots group's General) - exact reminder, no keyword guess:
+  python fast_reminder_update.py --reply_msg_id <the ⏰ message id> --local_at "YYYY-MM-DD HH:MM" --ack_id N --orig_id N --chat_id <chat of that ⏰>
+
 Time: prefer --local_at 'YYYY-MM-DD HH:MM' (Omer's LOCAL time; --israel_time forces Israel). --trigger_at is UTC.
 """
 import sys
@@ -24,7 +27,9 @@ from datetime import datetime, timezone, timedelta
 
 def main():
     p = base_args("Update a pending reminder (time and/or message text)")
-    p.add_argument("--message", required=True, help="Keyword to match in existing reminder message")
+    p.add_argument("--message", default=None, help="Keyword to match in existing reminder message")
+    p.add_argument("--reply_msg_id", default=None,
+                   help="Id of the fired ⏰ message Omer replied to (in --chat_id): picks that exact reminder")
     p.add_argument("--trigger_at", default=None,
                    help="New time in UTC: 'YYYY-MM-DD HH:MM:SS' (legacy; prefer --local_at)")
     p.add_argument("--local_at", default=None, help="New LOCAL time 'YYYY-MM-DD HH:MM' (home tz / travel destination)")
@@ -49,18 +54,30 @@ def main():
     if not args.trigger_at and not args.new_message:
         fail(args, "חסר פרמטר — יש לספק --trigger_at ו/או --new_message")
         return
+    if not args.message and not args.reply_msg_id:
+        fail(args, "חסר פרמטר - יש לספק --message או --reply_msg_id")
+        return
 
     try:
         conn = get_db()
 
         # Find the reminder
-        row = conn.execute(
-            "SELECT id, message, trigger_at FROM reminders WHERE status='pending' AND message LIKE ? ORDER BY trigger_at ASC LIMIT 1",
-            (f"%{args.message}%",)
-        ).fetchone()
+        row = None
+        if args.reply_msg_id:
+            # Reply to a ⏰: the chat-keyed link (chat_messages in a group, messages in private)
+            sys.path.insert(0, "D:/Kai/scripts")
+            import reminder_chat
+            rid = reminder_chat.reminder_for_message(conn, args.chat_id, args.reply_msg_id)
+            if rid:
+                row = conn.execute("SELECT id, message, trigger_at FROM reminders WHERE id = ?", (rid,)).fetchone()
+        if row is None and args.message:
+            row = conn.execute(
+                "SELECT id, message, trigger_at FROM reminders WHERE status='pending' AND message LIKE ? ORDER BY trigger_at ASC LIMIT 1",
+                (f"%{args.message}%",)
+            ).fetchone()
 
         if not row:
-            fail(args, f'לא נמצאה תזכורת עם "{args.message}"')
+            fail(args, f'לא נמצאה תזכורת עם "{args.message or args.reply_msg_id}"')
             conn.close()
             return
 
@@ -79,6 +96,9 @@ def main():
         if args.trigger_at:
             updates.append("trigger_at = ?")
             params.append(args.trigger_at)
+            # a new time re-arms it: a 👍-dismissed one-off fires again, the nag count starts over
+            updates.append("status = 'pending'")
+            updates.append("nag_count = 0")
 
         params.append(reminder_id)
         conn.execute(f"UPDATE reminders SET {', '.join(updates)} WHERE id = ?", params)

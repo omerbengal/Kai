@@ -116,15 +116,19 @@ def tg_reply(chat_id, text, reply_to=None, linkify=False):
         )
         try:
             err_resp = urllib.request.urlopen(err_req, timeout=10)
-            import tg_log  # keeps it in `messages`
-            tg_log.save_response(err_resp, err_text)
+            if not _is_group(chat_id):  # group ids would collide in `messages`
+                import tg_log  # keeps it in `messages`
+                tg_log.save_response(err_resp, err_text)
         except Exception:
             pass
         return None
 
     # Best-effort: save outgoing message to DB so reactions, bump and history work.
     # Same schema as save_telegram_message.py::save_message.
-    if msg_id is not None:
+    if msg_id is not None and _is_group(chat_id):
+        # Group ids collide with private ones (bots group General, 10/11/2026): chat-keyed table only
+        _save_group_row(chat_id, msg_id, text, reply_to)
+    elif msg_id is not None:
         try:
             from datetime import datetime, timezone
             ts = datetime.now(timezone.utc).isoformat()
@@ -164,7 +168,9 @@ def _send_cards(chat_id, cards, msg_id, text):
                 phone_links.note_flood(he.read().decode("utf-8", "replace"))  # 429: stop calling sendContact
                 break
             cid = res.get("result", {}).get("message_id")
-            if cid:
+            if cid and _is_group(chat_id):
+                _save_group_row(chat_id, cid, f"[כרטיס חיוג להודעה {msg_id}] {c['first']} {c['number']}", msg_id)
+            elif cid:
                 conn = sqlite3.connect(DB_PATH)
                 conn.execute(
                     "INSERT INTO messages (telegram_message_id, direction, text, reply_to_message_id, ts) "
@@ -187,7 +193,30 @@ def tg_delete(chat_id, msg_id):
         pass
     try:
         conn = sqlite3.connect(DB_PATH)
-        conn.execute("DELETE FROM messages WHERE telegram_message_id = ?", (int(msg_id),))
+        if _is_group(chat_id):  # never touch a private `messages` row that shares this id
+            import reminder_chat
+            reminder_chat.delete_row(conn, chat_id, msg_id)
+        else:
+            conn.execute("DELETE FROM messages WHERE telegram_message_id = ?", (int(msg_id),))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def _is_group(chat_id):
+    """Group / supergroup ids are negative (the bots group's General); the private chat is positive."""
+    return str(chat_id or "").strip().startswith("-")
+
+
+def _save_group_row(chat_id, msg_id, text, reply_to=None):
+    """Outgoing row for a group message in chat_messages (scripts/reminder_chat.py). Best-effort."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        import reminder_chat
+        conn = sqlite3.connect(DB_PATH)
+        conn.text_factory = str
+        reminder_chat.save_row(conn, chat_id, msg_id, text, reply_to=reply_to)
         conn.commit()
         conn.close()
     except Exception:
@@ -237,7 +266,8 @@ def delete_ack(ack_msg_id, chat_id):
     except Exception:
         pass
     tg_delete(chat_id, ack_msg_id)
-    log_ack(ack_msg_id, "deleted")
+    if not _is_group(chat_id):  # ack_log is keyed by message id only (private ids)
+        log_ack(ack_msg_id, "deleted")
 
 def finish(args, success_text, error_text=None, linkify=False):
     """Stop typing, send final reply, then delete ACK.
