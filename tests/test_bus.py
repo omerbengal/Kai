@@ -306,23 +306,23 @@ def test_wa_verify_sent_compares_whole_text(tmp_path):
 
 
 def test_read_name_rule_dvyomi_read_only(monkeypatch, tmp_path):
-    """11/11/2026 (Omer msg 1815): miluim may READ any chat whose name contains 'ערבחברים' (any spelling),
+    """11/11/2026 (Omer msg 1815): miluim may READ any chat whose name contains 'ערב-חברים' (any spelling),
     never send by that rule; other names stay refused."""
     setup(monkeypatch, tmp_path)
     cfg = json.loads(json.dumps(CFG))
-    cfg["bots"]["miluim"]["wa_policy"]["read_name_contains"] = ["ערבחברים"]
+    cfg["bots"]["miluim"]["wa_policy"]["read_name_contains"] = ["ערב-חברים"]
     cfgp = tmp_path / "bots2.json"
     cfgp.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
     monkeypatch.setattr(bus, "bots", lambda config_path=None: kai_bots.load_config(str(cfgp)))
-    for name in ("ערבחברים מפקדים ובנות זוג: 12-13.11", "ערבחברים 14-15", "ערבחברים", "מחזור ערבחברים"):
+    for name in ("ערב חברים מפקדים ובנות זוג: 12-13.11", "ערב-חברים 14-15", "ערב־חברים", "מחזור ערבחברים"):
         assert bus.allowed("miluim", "wa_read", "999@g.us", chat_name=name), name
         assert bus.allowed("miluim", "wa_search", "999@g.us", chat_name=name), name
         assert not bus.allowed("miluim", "wa_send", "999@g.us", chat_name=name), name
     for name in ("נשות המגדים", "יומי", "דו שבועי"):
         assert not bus.allowed("miluim", "wa_read", "999@g.us", chat_name=name), name
     # no name passed: the current name is looked up
-    monkeypatch.setattr(wa, "resolve_chat", lambda chat, *a, **k: (chat, "ערבחברים מפקדים"))
+    monkeypatch.setattr(wa, "resolve_chat", lambda chat, *a, **k: (chat, "ערב חברים מפקדים"))
     assert bus.allowed("miluim", "wa_read", "999@g.us")
     # whatsapp ("*") and fixed aliases unchanged
     assert bus.allowed("miluim", "wa_send", "111@g.us")
-    assert not bus.allowed("trading", "wa_read", "999@g.us", chat_name="ערבחברים")
+    assert not bus.allowed("trading", "wa_read", "999@g.us", chat_name="ערב חברים")

@@ -89,7 +89,7 @@ request, one atomic fact per note. Other bots read them only (resolve_name.py).
   FROM_BOT=<bot>`. Handle it exactly like main Kai's tag (👀, your topic, general-done), with these extras:
   - Only chats in `wa_policy` of that bot. Check with `python D:/Kai/bots/bus.py check --for <that bot> --chat
     "<chat>" [--kind send]` ("allowed": true/false; it also applies `read_name_contains`, a READ-only rule by
-    chat name, e.g. miluim reads any "ערבחברים" group). `bus.py policy --bot <other>` is refused by the guard
+    chat name, e.g. miluim reads any "ערב-חברים" group). `bus.py policy --bot <other>` is refused by the guard
     (bus identity). Not allowed: general-done `--fail` with one line why.
   - A read / search / summary: do it, and put the ANSWER the other bot needs in general-done `--summary`
     (for a bot tag it may be up to 10 short lines / 700 chars: the numbers / facts it asked for, nothing
