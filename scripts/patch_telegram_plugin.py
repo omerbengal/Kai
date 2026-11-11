@@ -290,6 +290,99 @@ def patch_button_cleanup(path: str) -> bool:
     return changed
 
 
+# --- edit_message inline keyboard (11/11/2026, miluim bot report, topic msg 1868) ---
+# edit_message had no inline_keyboard in its schema, so the argument was dropped silently, and
+# editMessageText without reply_markup REMOVES the message's buttons (Omer saw none). Now:
+# 1. schema gains inline_keyboard (same shape as reply); the handler passes it as reply_markup;
+# 2. any argument outside the schema (reply_markup, keyboard, buttons, typos) is an error, not a no-op;
+# 3. the description says an edit without inline_keyboard removes the buttons.
+# All-or-nothing like the topics patch. Not part of _server_is_patched (live-health check).
+EDIT_KB_MARKER = "kaiEditKb"
+EDIT_KB_REPLACEMENTS = [
+    (
+        "      description: 'Edit a message the bot previously sent. Useful for interim progress updates.",
+        "      description: 'Edit a message the bot previously sent. Useful for interim progress updates."
+        " Buttons on the message are REMOVED unless you pass inline_keyboard again (kaiEditKb).",
+    ),
+    (
+        "          },\n"
+        "        },\n"
+        "        required: ['chat_id', 'message_id', 'text'],\n",
+        "          },\n"
+        "          inline_keyboard: {\n"
+        "            type: 'array',\n"
+        "            description: 'Optional inline keyboard for the edited message. Array of rows, each row is"
+        " array of {text, callback_data}. Omit it and any existing buttons are removed.',\n"
+        "            items: {\n"
+        "              type: 'array',\n"
+        "              items: {\n"
+        "                type: 'object',\n"
+        "                properties: {\n"
+        "                  text: { type: 'string' },\n"
+        "                  callback_data: { type: 'string' },\n"
+        "                },\n"
+        "                required: ['text', 'callback_data'],\n"
+        "              },\n"
+        "            },\n"
+        "          },\n"
+        "        },\n"
+        "        required: ['chat_id', 'message_id', 'text'],\n",
+    ),
+    (
+        "        const edited = await bot.api.editMessageText(\n"
+        "          args.chat_id as string,\n"
+        "          Number(args.message_id),\n"
+        "          args.text as string,\n"
+        "          ...(editParseMode ? [{ parse_mode: editParseMode }] : []),\n"
+        "        )\n",
+        "        const editKnown = ['chat_id', 'message_id', 'text', 'format', 'inline_keyboard'] // kaiEditKb\n"
+        "        for (const k of Object.keys(args)) {\n"
+        "          if (!editKnown.includes(k)) throw new Error(`edit_message: unknown argument '${k}'"
+        " - buttons go in inline_keyboard: [[{text, callback_data}]]`)\n"
+        "        }\n"
+        "        const editKb = args.inline_keyboard as Array<Array<{text: string, callback_data: string}>>"
+        " | undefined\n"
+        "        const edited = await bot.api.editMessageText(\n"
+        "          args.chat_id as string,\n"
+        "          Number(args.message_id),\n"
+        "          args.text as string,\n"
+        "          {\n"
+        "            ...(editParseMode ? { parse_mode: editParseMode } : {}),\n"
+        "            ...(editKb ? { reply_markup: { inline_keyboard: editKb } } : {}),\n"
+        "          },\n"
+        "        )\n",
+    ),
+]
+
+
+def edit_kb_patch_text(content: str):
+    """content with the edit_message keyboard patch applied, or None if an anchor is missing / not unique.
+    Pure (no I/O) so tests can run it on a copy of server.ts."""
+    if EDIT_KB_MARKER in content:
+        return content
+    for anchor, _ in EDIT_KB_REPLACEMENTS:
+        if content.count(anchor) != 1:
+            return None
+    for anchor, replacement in EDIT_KB_REPLACEMENTS:
+        content = content.replace(anchor, replacement, 1)
+    return content
+
+
+def patch_edit_keyboard(path: str) -> bool:
+    with open(path, "r", encoding="utf-8") as f:
+        content = f.read()
+    if EDIT_KB_MARKER in content:
+        return False
+    patched = edit_kb_patch_text(content)
+    if patched is None:
+        print(f"[patch_telegram] edit_kb: an anchor is missing or not unique in {path}; nothing written",
+              file=sys.stderr)
+        return False
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(patched)
+    return True
+
+
 # --- Poll give-up on 409 patch (investigation #035) ---
 # The poll loop gave up permanently after 8 consecutive 409 Conflicts (~28s of
 # cumulative backoff). But a force-killed old poller keeps Telegram's getUpdates
@@ -807,6 +900,10 @@ def main():
         btn_applied = patch_button_cleanup(path)
         print(f"[patch_telegram] button_cleanup {'patched' if btn_applied else 'already patched'}: {path}",
               file=sys.stderr)
+
+        edit_kb_applied = patch_edit_keyboard(path)
+        print(f"[patch_telegram] edit_keyboard {'patched' if edit_kb_applied else 'already patched or skipped'}:"
+              f" {path}", file=sys.stderr)
 
         poll_giveup_applied = patch_poll_giveup(path)
         verb4 = "patched" if poll_giveup_applied else "already patched"
