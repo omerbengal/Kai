@@ -89,8 +89,10 @@ WA_FOR_WA_BOT = """## WhatsApp - you are its only owner
 - **Requests from other bots come as General tags** (06/11/2026, Omer: "חלוקת תפקידים טהורה"): another Kai
   bot posts `@<bot-username> <request>` in General; the auto-ACK line carries `GENERAL_TAG=1 ...
   FROM_BOT=<bot>`. Handle it exactly like main Kai's tag (👀, your topic, general-done), with these extras:
-  - Only chats in `wa_policy` of that bot (`D:/Kai/config/bots.json`, `bus.py policy --bot <that bot>` shows
-    it): outside it, general-done `--fail` with one line why.
+  - Only chats in `wa_policy` of that bot. Check with `python D:/Kai/bots/bus.py check --for <that bot> --chat
+    "<chat>" [--kind send]` ("allowed": true/false; it also applies `read_name_contains`, a READ-only rule by
+    chat name, e.g. miluim reads any "ערבחברים" group). `bus.py policy --bot <other>` is refused by the guard
+    (bus identity). Not allowed: general-done `--fail` with one line why.
   - A read / search / summary: do it, and put the ANSWER the other bot needs in general-done `--summary`
     (for a bot tag it may be up to 10 short lines / 700 chars: the numbers / facts it asked for, nothing
     else). That General reply is what the asking bot receives. The detail reply in your topic stays as usual.

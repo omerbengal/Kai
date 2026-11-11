@@ -28,6 +28,8 @@ CLI (models; bots/guard.py makes sure --from / --bot is the calling bot itself):
                 sent in this order; jpg/jpeg/png/gif/webp; signature only under the last one)
   bus.py wait   --id N --bot B [--timeout 180]
   bus.py status --id N | policy --bot B | audit [--today]
+  bus.py check  --for B --chat C [--kind read|send]   read-only yes/no on wa_policy for bot B (WhatsApp bot,
+                before serving a General tag; --for, not --bot, so it is not a bus identity)
 Code only (guard blocks models from these):
   bus.py serve [--once]          the executor (task KaiBusServe), the only caller of bots/wa.py send
   bus.py approve-hook --bot B    UserPromptSubmit hook: Omer's busok:N / busno:N press
@@ -35,6 +37,7 @@ Code only (guard blocks models from these):
 import io
 import json
 import os
+import re
 import socket
 import sqlite3
 import sys
@@ -122,13 +125,43 @@ def policy(bot, config_path=None):
     return bots(config_path).get(bot, {}).get("wa_policy", {"read": [], "send": []})
 
 
-def allowed(bot, kind, chat_jid, config_path=None):
+_NAME_SEP = re.compile(r"[\s\-־‐-―_]+")
+
+
+def _name_key(s):
+    """'ערבחברים' / 'ערבחברים' / 'ערבחברים' / 'ערבחברים' all become 'ערבחברים'."""
+    return _NAME_SEP.sub("", (s or "")).lower()
+
+
+def name_rule_match(bot, chat_name, config_path=None):
+    """11/11/2026 (Omer msg 1815): wa_policy.read_name_contains = READ-only rule by chat name. Sends never use
+    it: a send needs the chat in wa_policy.send AND Omer's own button, as always."""
+    key = _name_key(chat_name)
+    if not key:
+        return None
+    for part in policy(bot, config_path).get("read_name_contains", []):
+        if _name_key(part) and _name_key(part) in key:
+            return part
+    return None
+
+
+def allowed(bot, kind, chat_jid, config_path=None, chat_name=None):
     import wa
-    lst = policy(bot, config_path).get(KIND_POLICY[kind], [])
+    pol_kind = KIND_POLICY[kind]
+    lst = policy(bot, config_path).get(pol_kind, [])
     if "*" in lst:
         return True
     al = wa.aliases(config_path or kai_bots.CONFIG)
-    return chat_jid in {al.get(x, x) for x in lst}
+    if chat_jid in {al.get(x, x) for x in lst}:
+        return True
+    if pol_kind == "read" and policy(bot, config_path).get("read_name_contains"):
+        if chat_name is None or chat_name == chat_jid:
+            try:  # the CURRENT name, so a renamed chat is judged by what it is called now
+                chat_name = wa.resolve_chat(chat_jid)[1]
+            except Exception:
+                return False
+        return name_rule_match(bot, chat_name, config_path) is not None
+    return False
 
 
 # --- Telegram posts (each by the writing bot, into its own topic) ---------------------------------
@@ -193,7 +226,7 @@ def create(from_bot, kind, payload, summary, db=None):
     if kind != "wa_search" or chat:
         jid, name = wa.resolve_chat(chat)
         payload = dict(payload, chat=jid, chat_name=name)
-        if not allowed(from_bot, kind, jid):
+        if not allowed(from_bot, kind, jid, chat_name=name):
             raise BusError(f"policy: {from_bot} may not {KIND_POLICY[kind]} '{name}' "
                            f"(config/bots.json wa_policy; Omer decides)")
     elif "*" not in policy(from_bot).get("read", []):
@@ -562,6 +595,13 @@ def main(argv):
         elif cmd == "policy":
             b = _arg(argv, "--bot")
             out = {"bot": b, "wa_policy": policy(b), "aliases": __import__("wa").aliases()}
+        elif cmd == "check":  # read-only yes/no: may the WhatsApp bot read / send chat C for bot B's request?
+            b = _arg(argv, "--for")
+            kind = {"read": "wa_read", "send": "wa_send"}[_arg(argv, "--kind", "read")]
+            jid, name = __import__("wa").resolve_chat(_arg(argv, "--chat"))
+            ok = allowed(b, kind, jid, chat_name=name)
+            out = {"for": b, "kind": KIND_POLICY[kind], "chat": jid, "chat_name": name, "allowed": ok,
+                   "by_name_rule": name_rule_match(b, name) if ok and kind == "wa_read" else None}
         elif cmd == "audit":
             c = conn()
             q = "SELECT ts, request_id, actor, event, substr(detail,1,120) d FROM audit"
