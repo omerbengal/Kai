@@ -200,17 +200,26 @@ Such a message has NO `message_thread_id`, and the auto-ACK line carries
 ## When you need Omer: General, with him tagged (07/11/2026, Omer msgs 781 / 791)
 
 Omer: "זה חייב להיות שיח ב-General, והשיחה בנושאים זה בשביל הרחבה או שיח שהוא לא כללי / בין-בוטים".
+- **Where the task STARTED decides where you ask** (Omer, 12/11/2026, msg 2403 + button askloc_topic in the
+  miluim topic: "למה הכפתורים נשלחים בקבוצה General? למה לא פה?"):
+  - **Omer wrote to you in YOUR topic** (no `GENERAL_TAG`, no `GENERAL_PENDING_TAG`, no `FROM_BOT`): every
+    question / decision / buttons to him stays IN YOUR TOPIC, a plain `reply` (with `inline_keyboard`,
+    `reply_to` his message). Never general-ask for it. The code still posts the "waiting" line in General if a
+    buttons question there is unanswered after 2 minutes (the safety net below): do not post it yourself.
+  - **A tag in General** (from Omer, main Kai or another bot), or no Omer message at all (a scheduled job, a
+    `BOT_ANSWER` you finish alone): exactly the rules below, general-ask / general-wait as before.
+  The rest of this section is about General tasks unless it says otherwise.
 - **Every message of Omer you handle ends without 👀** (07/11/2026, Omer msg 852: 👀 stayed on 837 / 842 after
   they were answered). In General you answer ONLY with general-done (finished) or general-ask (stopped /
   question / refusal), always with `--tag-msg` of the open task: both turn his answers' 👀 into 👍 in code. A
   plain `reply` in General is caught by a hook (his answers ← 👍, the task ← 🤔 waiting) but is still wrong.
-- **Stopped, failed, unsure, blocked (policy / guard / missing access), or a short yes/no decision** - also when
-  another bot or main Kai tagged you - goes STRAIGHT to General as ONE short message that tags Omer:
+- **Stopped, failed, unsure, blocked (policy / guard / missing access), or a short yes/no decision** in a task
+  that did NOT start in your topic - also when another bot or main Kai tagged you - goes STRAIGHT to General as ONE short message that tags Omer:
   `python D:/Kai/bots/bot_tg.py general-ask --bot whatsapp --text "<the issue + the question, max 3 short lines>"
   [--tag-msg <TAG_MSG_ID>] [--buttons '<inline_keyboard JSON>'] [--detail-msg <id of the detail in your topic>]`.
   It opens with a real mention of Omer (he has no @username: a text mention on "עומר", so he gets notified),
-  replies to the tag, sets 🤔, deletes the tag's ACK and tracks the question. Never write that question in
-  your topic, and never send Omer to your topic to answer it. The detail (what you checked, a long list) may go
+  replies to the tag, sets 🤔, deletes the tag's ACK and tracks the question. In a General task never write
+  that question in your topic, and never send Omer to your topic to answer it. The detail (what you checked, a long list) may go
   in your topic first; link it with `--detail-msg`.
 - **A question that needs the detail on screen** (a draft to approve, a choice between several options with
   buttons, a WhatsApp send preview) stays in your topic with its buttons (then `general-wait` for a General

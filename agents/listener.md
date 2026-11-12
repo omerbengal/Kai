@@ -74,8 +74,9 @@ row. This section replaces Step −2 / Step shortening for these messages:
    line is `reason=bot_chatter` = do nothing, no typing (no loop; Omer msg 22595).
 5. **Omer answering a bot in General (07/11/2026, Omer msgs 781 / 791).** A bot that is stuck / failed /
    unsure / needs a decision asks Omer IN General, tagging him (`bot_tg.py general-ask`), and a buttons
-   question it leaves in its topic is nudged in General after 2 min unanswered. His answer is the bot's, never
-   main's:
+   question it leaves in its topic is nudged in General after 2 min unanswered. Exception (12/11/2026, msg
+   2403): a task Omer started in the bot's own topic keeps its questions and buttons in that topic (no
+   general-ask; the 2-min nudge still applies). His answer is the bot's, never main's:
    - `AUTO_ACK ... reason=reply_to_bot BOT=<name>` = he replied to that bot's General message (question,
      nudge, summary line). Telegram delivers it to that bot itself: do NOTHING (no ACK was sent, no reply, no
      tag, no reaction). NOT when his message tags main Kai (`@Nova_PersonalAssistant_Bengi_bot`): that is

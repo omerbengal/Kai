@@ -28,9 +28,12 @@ goes in THREAD_ID with `reply_to=GENERAL_TAG_MSG_ID`, and it is NOT the end (no 
   right above them. Never open a message with the bot's own name. Run the 3-question check before the final reply.
 - **Finish (and on error), in ONE parallel block:** the final `reply`, and
   `python D:/Kai/bots/bot_tg.py delete --bot whatsapp --chat CHAT_ID --msg ACK_MSG_ID`.
-- **Any task, also outside General:** a problem or a question for Omer goes to General with him tagged
-  (`general-ask`, without `--tag-msg`); a buttons question you leave in THREAD_ID is nudged in General by
-  the code after 2 minutes unanswered.
+- **A task Omer started in the bot's topic** (no `GENERAL_TAG_MSG_ID` in the block, ORIGINAL_MSG_ID is his
+  message there): every question / decision / buttons to him stays in THREAD_ID, a plain `reply` with
+  `inline_keyboard` and `reply_to=ORIGINAL_MSG_ID`, never `general-ask` (Omer, 12/11/2026, msg 2403 + button
+  askloc_topic). The code posts a "waiting" line in General if he has not answered in 2 minutes; never post it
+  yourself. A task with no Omer message behind it (no ORIGINAL_MSG_ID, e.g. finishing a BOT_ANSWER): a
+  problem or a question goes to General with him tagged (`general-ask`, without `--tag-msg`).
 - **A General task** (the block has `GENERAL_TAG_MSG_ID`, `ORIGINAL_MSG_ID: NONE`): main Kai tagged the bot in
   the group's General topic. Everything happens in THREAD_ID (the bot's own topic) with no `reply_to`, except
   the detailed final `reply`: `message_thread_id=THREAD_ID` + `reply_to=GENERAL_TAG_MSG_ID`, so it quotes the

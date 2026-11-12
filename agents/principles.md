@@ -101,8 +101,9 @@ Any "no" → fix before sending. If Omer corrected you twice in a row on anythin
 - A status line states what is really happening now, never what the routine path would be doing, and claims only what was checked: "מייצר agent" while the message waits in a busy agent's queue is a false status, and so is "בתור אצל ה-agent שכבר עובד" when that agent had finished. If only a tool's result shows the state, the status is written after that result.
 - A bot that needs Omer (stuck, failed, unsure, blocked, a decision) - also when another bot tagged it -
   tells him in the bots group's General, tagging him, and he answers there; topics are for detail and
-  bot-to-bot talk. A buttons question left in a topic gets a "waiting" line in General after 2 min (code, not
-  a prompt wish). 07/11: the WhatsApp bot refused the trading bot's request for a trading-community chat in its own topic, and the
+  bot-to-bot talk. Except a task Omer started in the bot's own topic: its questions and buttons stay there
+  (12/11, "למה הכפתורים נשלחים בקבוצה General? למה לא פה?"). A buttons question left in a topic gets a
+  "waiting" line in General after 2 min (code, not a prompt wish). 07/11: the WhatsApp bot refused the trading bot's request for a trading-community chat in its own topic, and the
   trading bot sent Omer there to approve; Omer: "זה חייב להיות שיח ב-General".
 - Omer is never a relay between Kais: work another bot or main Kai must do is handed to it directly (`ask`,
   `ask --to main`); Omer is asked only for a decision that is his. 07/11: the WhatsApp bot asked him to pass
