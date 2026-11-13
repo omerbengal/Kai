@@ -188,7 +188,9 @@ def test_media_partial_failure_reports_k_of_n_no_retry(monkeypatch, tmp_path):
 def test_media_validation(monkeypatch, tmp_path):
     db, posts = setup(monkeypatch, tmp_path)
     import pytest
-    for items in ([], [{"file": str(tmp_path / "missing.png")}], [{"file": __file__}],
+    prog = tmp_path / "run.exe"
+    prog.write_bytes(b"MZ")
+    for items in ([], [{"file": str(tmp_path / "missing.png")}], [{"file": str(prog)}],
                   [{"file": f} for f in _imgs(tmp_path, 11)]):
         with pytest.raises(bus.BusError):
             bus.create("whatsapp", "wa_send_media", {"chat": "staff", "items": items}, "s", db)
@@ -326,3 +328,71 @@ def test_read_name_rule_dvyomi_read_only(monkeypatch, tmp_path):
     # whatsapp ("*") and fixed aliases unchanged
     assert bus.allowed("miluim", "wa_send", "111@g.us")
     assert not bus.allowed("trading", "wa_read", "999@g.us", chat_name="ערב חברים")
+
+
+# --- documents (13/11/2026, Omer: "לשלוח קבצים לוואטסאפ"; an xlsx with a Hebrew file name) -------------------
+
+def test_document_draft_needs_button_then_sends_as_document(monkeypatch, tmp_path):
+    db, posts = setup(monkeypatch, tmp_path)
+    FakeWaMedia.media, FakeWaMedia.fail_at = [], None
+    xlsx = tmp_path / "רשימת_נרשמים_13.11.xlsx"
+    xlsx.write_bytes(b"PK\x03\x04" + b"x" * 3000)
+    rid, p = bus.create("whatsapp", "wa_send_media",
+                        {"chat": "staff", "items": [{"file": str(xlsx), "caption": "מצרף את האקסל 🙏🏻"}]}, "xlsx", db)
+    it = p["items"][0]
+    assert it["kind"] == "document" and it["name"] == xlsx.name and it["size_kb"] >= 3
+    assert bus.serve_once(db, FakeWaMedia) == 0 and FakeWaMedia.media == []   # draft until Omer's button
+    _approve(rid, db)
+    assert bus.serve_once(db, FakeWaMedia) == 1
+    assert FakeWaMedia.media == [("111@g.us", xlsx.name, "מצרף את האקסל 🙏🏻", True)]
+
+
+def test_mixed_image_and_document_kinds(monkeypatch, tmp_path):
+    db, posts = setup(monkeypatch, tmp_path)
+    pdf = tmp_path / "plan.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    rid, p = bus.create("whatsapp", "wa_send_media",
+                        {"chat": "staff", "items": [{"file": _imgs(tmp_path, 1)[0]}, {"file": str(pdf)}]}, "s", db)
+    assert [i["kind"] for i in p["items"]] == ["image", "document"]
+
+
+def test_check_media_refuses_programs_secrets_empty_and_no_ext(tmp_path):
+    import pytest
+    bad = {"a.bat": b"echo", "b.ps1": b"x", "k.pem": b"x", "google_token_docs.json": b"{}",
+           "my_api_key.txt": b"x", "empty.xlsx": b"", "noext": b"x"}
+    for name, data in bad.items():
+        f = tmp_path / name
+        f.write_bytes(data)
+        with pytest.raises(wa.WaError):
+            wa.check_media(str(f))
+    for name in ("r.xlsx", "r.csv", "r.docx", "r.pdf", "r.zip", "r.txt"):
+        f = tmp_path / name
+        f.write_bytes(b"data")
+        assert wa.check_media(str(f)) == os.path.abspath(str(f)) and wa.media_kind(f) == "document"
+
+
+def test_check_media_size_limit(monkeypatch, tmp_path):
+    import pytest
+    f = tmp_path / "big.pdf"
+    f.write_bytes(b"x" * 2048)
+    monkeypatch.setattr(wa, "MAX_FILE_MB", 0.001)
+    with pytest.raises(wa.WaError):
+        wa.check_media(str(f))
+
+
+def test_wa_send_document_payload(tmp_path):
+    doc = tmp_path / "רשימה.xlsx"
+    doc.write_bytes(b"PK")
+    seen = {}
+
+    class Resp:
+        def read(self):
+            return b'{"success": true, "message": "ok"}'
+
+    def opener(req, timeout):
+        seen["body"], seen["timeout"] = json.loads(req.data.decode("utf-8")), timeout
+        return Resp()
+
+    out = wa.send_media("1@g.us", str(doc), "כיתוב", sign=True, opener=opener)
+    assert out["kind"] == "document" and out["file"] == "רשימה.xlsx"
+    assert seen["body"]["media_path"] == os.path.abspath(str(doc)) and seen["timeout"] >= 60

@@ -298,22 +298,47 @@ def verify_sent(jid, text, db_path=None, tries=8, sleep=None, device_db=None):
     raise WaError(f"post-send check failed: WhatsApp holds {got} chars, approved text is {len(expected)} chars")
 
 
-MEDIA_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp")
+MEDIA_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp")   # sent as a WhatsApp image (photo with a caption)
+# 13/11/2026 (Omer, "לשלוח קבצים לוואטסאפ"): any other file goes out as a WhatsApp document, file name kept
+# (the bridge's /api/send picks image / video / document by extension, main.go sendWhatsAppMessage).
+# Refused: programs / scripts that run on open, and secrets (tokens, keys, .env) - Omer's button approves a
+# preview, but a credential must never be one click away from a group.
+BLOCKED_EXTS = (".exe", ".bat", ".cmd", ".com", ".scr", ".msi", ".dll", ".ps1", ".vbs", ".vbe", ".js", ".jse",
+                ".wsf", ".hta", ".lnk", ".reg", ".jar", ".pem", ".key", ".pfx", ".p12", ".env")
+SECRET_NAME_RE = re.compile(r"token|secret|credential|password|passwd|api[_-]?key|access\.json|\.env\b", re.I)
+MAX_FILE_MB = 100
+
+
+def media_kind(path):
+    """'image' for the photo extensions, otherwise 'document' (what the bridge will send)."""
+    return "image" if os.path.splitext(str(path))[1].lower() in MEDIA_EXTS else "document"
 
 
 def check_media(path):
-    """Absolute path of an existing image file, or WaError. Images only (07/11/2026 spec, msg 840)."""
+    """Absolute path of an existing, sendable file, or WaError.
+    Images (07/11/2026, msg 840) and, since 13/11/2026, documents of any other type (xlsx, pdf, docx, csv...)."""
     p = os.path.abspath(str(path or "").strip().strip('"'))
-    if os.path.splitext(p)[1].lower() not in MEDIA_EXTS:
-        raise WaError(f"not an image ({', '.join(MEDIA_EXTS)}): {path}")
+    name = os.path.basename(p)
+    ext = os.path.splitext(p)[1].lower()
+    if not ext:
+        raise WaError(f"file has no extension (WhatsApp needs it to open the file): {path}")
+    if ext in BLOCKED_EXTS:
+        raise WaError(f"refused: {ext} files are not sent to WhatsApp (programs / keys): {path}")
+    if SECRET_NAME_RE.search(name):
+        raise WaError(f"refused: the file name looks like a secret / credential: {name}")
     if not os.path.isfile(p):
         raise WaError(f"file not found: {path}")
+    size = os.path.getsize(p)
+    if size == 0:
+        raise WaError(f"file is empty: {path}")
+    if size > MAX_FILE_MB * 1024 * 1024:
+        raise WaError(f"file is {size // (1024 * 1024)} MB, the limit is {MAX_FILE_MB} MB: {path}")
     return p
 
 
 def send_media(jid, path, caption="", sign=True, opener=urllib.request.urlopen):
-    """Raw bridge send of ONE image with a caption. Callers: bus.py serve ONLY (approved request).
-    The bridge's /api/send takes media_path and sends `message` as the image caption (main.go, Caption)."""
+    """Raw bridge send of ONE file (image or document) with a caption. Callers: bus.py serve ONLY (approved request).
+    The bridge's /api/send takes media_path and sends `message` as the caption (main.go, Caption)."""
     p = check_media(path)
     caption = (caption or "").strip()
     if sign:
@@ -322,10 +347,12 @@ def send_media(jid, path, caption="", sign=True, opener=urllib.request.urlopen):
                          ensure_ascii=False).encode("utf-8")
     req = urllib.request.Request(f"{BRIDGE}/api/send", data=payload,
                                  headers={"Content-Type": "application/json; charset=utf-8"})
-    data = json.loads(opener(req, timeout=60).read())
+    timeout = min(300, 60 + os.path.getsize(p) // (512 * 1024))   # upload time grows with the file
+    data = json.loads(opener(req, timeout=timeout).read())
     if not data.get("success"):
         raise WaError(f"bridge refused: {str(data)[:200]}")
-    return {"sent": True, "file": os.path.basename(p), "bridge": str(data.get("message", ""))[:200]}
+    return {"sent": True, "file": os.path.basename(p), "kind": media_kind(p),
+            "bridge": str(data.get("message", ""))[:200]}
 
 
 def _arg(argv, flag, default=None):

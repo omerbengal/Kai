@@ -23,9 +23,11 @@ CLI (models; bots/guard.py makes sure --from / --bot is the calling bot itself):
   bus.py draft  --from B --chat C --text "<exact text>" | --text-file <utf-8 path> --summary "..."  -> REQUEST_ID,
                 busok:N / busno:N, and the stored text + chars (the preview Omer approves). A stray argv token
                 (text split by a quote) is refused. A send is "done" only after wa.verify_sent finds the whole text.
-  bus.py draft  --from B --chat C --file <image> [--text "<caption>"] --summary "..."     one image + caption
+  bus.py draft  --from B --chat C --file <path> [--text "<caption>"] --summary "..."     one file + caption
   bus.py draft  --from B --chat C --file P1 --caption C1 --file P2 --caption C2 ... --summary "..."  (max 10,
-                sent in this order; jpg/jpeg/png/gif/webp; signature only under the last one)
+                sent in this order; signature only under the last one). jpg/jpeg/png/gif/webp go as images,
+                any other file (xlsx, pdf, docx, csv...) as a WhatsApp document with its file name (13/11/2026);
+                programs, keys and secret-looking names are refused (wa.check_media)
   bus.py wait   --id N --bot B [--timeout 180]
   bus.py status --id N | policy --bot B | audit [--today]
   bus.py check  --for B --chat C [--kind read|send]   read-only yes/no on wa_policy for bot B (WhatsApp bot,
@@ -61,6 +63,8 @@ SEND_KINDS = ("wa_send", "wa_send_media")
 # wa_send_media (07/11/2026, spec by the WhatsApp bot, msg 840): images with captions, in order. A NEW kind and
 # not an extension of wa_send, so an executor still running the old code fails it ("unknown kind") instead of
 # sending only the captions. The signature goes on the LAST image's caption only.
+# 13/11/2026 (Omer, "לשלוח קבצים לוואטסאפ"): the same kind carries documents too (wa.check_media); the bridge
+# already sent non-image files as documents, so an old executor would send them the same way.
 MAX_MEDIA = 10
 
 SCHEMA = [
@@ -251,17 +255,20 @@ def create(from_bot, kind, payload, summary, db=None):
 
 
 def media_items(items):
-    """Validated [{file: abs path, caption}] for wa_send_media (1..MAX_MEDIA existing images)."""
+    """Validated [{file: abs path, caption, name, kind, size_kb}] for wa_send_media (1..MAX_MEDIA files).
+    name / kind / size_kb are for the preview Omer approves (which file, sent as image or document)."""
     import wa
     items = list(items or [])
     if not items:
-        raise BusError("no image given (--file)")
+        raise BusError("no file given (--file)")
     if len(items) > MAX_MEDIA:
-        raise BusError(f"at most {MAX_MEDIA} images per request")
+        raise BusError(f"at most {MAX_MEDIA} files per request")
     out = []
     for it in items:
         try:
-            out.append({"file": wa.check_media(it.get("file")), "caption": (it.get("caption") or "").strip()})
+            p = wa.check_media(it.get("file"))
+            out.append({"file": p, "caption": (it.get("caption") or "").strip(), "name": os.path.basename(p),
+                        "kind": wa.media_kind(p), "size_kb": max(1, round(os.path.getsize(p) / 1024))})
         except wa.WaError as e:
             raise BusError(str(e))
     return out
@@ -335,7 +342,7 @@ def execute(row, wa_mod=None):
             except Exception as e:  # no automatic retry: a half-sent series must be looked at, not repeated
                 raise BusError(f"נשלחו {len(sent)} מתוך {len(items)} ({type(e).__name__}: {e})"[:400])
         return {"sent": True, "count": len(sent), "chat": p.get("chat_name"),
-                "files": [s.get("file") for s in sent]}
+                "files": [s.get("file") for s in sent], "kinds": [s.get("kind") for s in sent]}
     raise BusError(f"unknown kind {row['kind']}")
 
 

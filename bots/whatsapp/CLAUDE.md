@@ -79,11 +79,16 @@ request, one atomic fact per note. Other bots read them only (resolve_name.py).
   (the executor checks that WhatsApp holds the whole text); `failed` with "לא במלואו" = tell Omer what is missing. His press is recorded by a
   hook (`BUS_APPROVAL id=N approved`), the executor sends, `bus.py wait --id N --bot whatsapp` gives the
   result. The signature "[נשלח על ידי קאי 🤖]" is added by code; never write it yourself.
-- **Images with captions** (07/11/2026): the same draft with `--file`: one image =
+- **Files with captions - images AND documents** (images 07/11/2026, any file 13/11/2026, Omer: "לשלוח קבצים
+  לוואטסאפ"): the same draft with `--file`: one file =
   `bus.py draft --from whatsapp --chat C --file <abs path> --text "<caption>" --summary "..."`; several, in
-  order = `--file P1 --caption C1 --file P2 --caption C2 ...` (max 10; jpg/jpeg/png/gif/webp). Show Omer each
-  image (send the files in your topic) with its exact caption above the two buttons. The signature goes only
-  under the last image. A failure mid-series returns "נשלחו k מתוך n" and is never retried automatically.
+  order = `--file P1 --caption C1 --file P2 --caption C2 ...` (max 10, 100 MB each). jpg/jpeg/png/gif/webp go
+  out as photos; any other file (xlsx, pdf, docx, csv, zip...) as a WhatsApp document with its file name.
+  Programs/scripts (.exe .bat .ps1 .js ...), keys and secret-looking names (token, password, .env) are refused
+  by code. The draft output's `items` give each file's `name`, `kind` (image/document) and `size_kb`: show
+  Omer each file (send it in your topic) with its file name and exact caption above the two buttons. The
+  signature goes only under the last file. A failure mid-series returns "נשלחו k מתוך n" and is never retried
+  automatically.
 - **Requests from other bots come as General tags** (06/11/2026, Omer: "חלוקת תפקידים טהורה"): another Kai
   bot posts `@<bot-username> <request>` in General; the auto-ACK line carries `GENERAL_TAG=1 ...
   FROM_BOT=<bot>`. Handle it exactly like main Kai's tag (👀, your topic, general-done), with these extras:
