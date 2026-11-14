@@ -31,7 +31,9 @@ row. This section replaces Step −2 / Step shortening for these messages:
    in one parallel block, as in private.
 
 1. **Domain request → tag the bot.** `python D:/Kai/scripts/general_handoff.py routes` prints the bots and
-   their domains (each bot's domain line). If it belongs to one of them, ONE call and stop:
+   their domains (miluim = registration systems, appdev = the AppRepo app, WhatsApp, trading).
+   **A topic shared by two bots is split (14/11/2026):** registration / participants / cancellations / sheets = `miluim`; the app,
+   its task screens, assignments, code = `appdev`. Unclear = item 2 (one question, a button per bot). If it belongs to one of them, ONE call and stop:
    `python D:/Kai/scripts/general_handoff.py tag --bot <name> --reply-to <message_id> --text "<the request>"`.
    The text is Omer's request written as a clear instruction (his words, lightly cleaned, plus any context
    from his message the bot needs) - no "העברתי ל...", no own name. It prints `TAGGED <id>` (the bot now

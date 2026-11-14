@@ -30,6 +30,8 @@ set CLAUDE_PID=
 set KAI_BOT=%BOT%
 set TELEGRAM_STATE_DIR=%HOME_DIR%\telegram_state
 set CLAUDE_CODE_GIT_BASH_PATH=C:\Program Files\Git\bin\bash.exe
+:: Optional per-bot environment (14/11/2026: appdev puts Flutter 3.50 first on PATH)
+if exist "%HOME_DIR%\bot_env.bat" call "%HOME_DIR%\bot_env.bat"
 title Kai-%BOT%
 :: "& exit /b" stays on the launch line (cmd resumes a .bat by offset, see start_claude.bat)
 "C:\Users\Omer\.local\bin\claude.exe" --model claude-opus-5-5 --effort medium --channels plugin:telegram@claude-plugins-official --dangerously-skip-permissions "/reload-plugins" & exit /b

@@ -147,6 +147,10 @@ def main(argv):
     ups = call(tok, "getUpdates?timeout=0&allowed_updates=" +
                urllib.request.quote(json.dumps(["message", "my_chat_member"])))
     group_id, thread_id, title = find_group_and_topic(ups.get("result", []), topic_name)
+    # 14/11/2026: main Kai can create the topic itself (createForumTopic) and record it in config first; a new
+    # bot never saw that topic's creation in its own getUpdates, so the config values are used when present.
+    if cfg.get("group_id") and cfg.get("topics"):  # config first: discovery may pick any topic message
+        group_id, thread_id = str(cfg["group_id"]), str(cfg["topics"][0])
     print(f"group={group_id} ({title}) topic={thread_id}")
     if not group_id or not thread_id:
         raise SystemExit("group or topic not found yet - write one message in the topic and run again")

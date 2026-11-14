@@ -26,6 +26,7 @@ import sys
 from datetime import datetime, timezone
 
 sys.path.insert(0, "D:/Kai/scripts")
+sys.path.insert(0, "D:/Kai/bots")
 import kai_bots  # noqa: E402
 
 WHATSAPP = [
@@ -60,6 +61,10 @@ SELF_PROTECT_FILES = SELF_PROTECT + [r"d:/kai/bots/"]  # Write/Edit only: the sh
 CONTACT_WRITE = re.compile(
     r"\b(insert\s+(or\s+\w+\s+)?into|replace\s+into|update|delete\s+from)\s+[\"'`\[]?people(_notes)?\b",
     re.IGNORECASE)
+
+RELEASE_CODE_ONLY = [r"release_ok\.json", r"release_gate\.py\W+hook"]
+# Claude's scratchpad / temp: always writable, also for a bot with write_roots
+SCRATCH_ROOTS = ["/appdata/local/temp/"]
 
 SHELL_TOOLS = {"Bash", "PowerShell"}
 FILE_TOOLS = {"Read", "Write", "Edit", "NotebookEdit", "Glob", "Grep"}
@@ -116,9 +121,29 @@ def check(name, tool, tool_input, config_path=kai_bots.CONFIG):
         own = SELF_PROTECT_FILES if t in WRITE_TOOLS else SELF_PROTECT
         rules += [(p, "the bot's own guard / settings / config are not editable by the bot") for p in own]
     rules += [(p, "blocked for this bot by config/bots.json blocked_patterns") for p in cfg.get("blocked_patterns", [])]
+    # 14/11/2026 (appdev): Omer's merge approval is written only by the release_gate hook (his button)
+    rules += [(p, "release approvals are code-only (Omer's relok button)") for p in RELEASE_CODE_ONLY]
     for pat, why in rules:
         if re.search(pat, text):
             return f"{why} (matched {pat!r})"
+    if t in WRITE_TOOLS and cfg.get("write_roots"):
+        target = norm(tool_input.get("file_path") or tool_input.get("notebook_path") or "")
+        target = re.sub(r"^/([a-z])/", r":/", target)  # git-bash /d/... = d:/...
+        roots = [norm(r).rstrip("/") + "/" for r in cfg["write_roots"]]
+        if ".." in target or not (any(target.startswith(r) for r in roots)
+                                  or any(r in target for r in SCRATCH_ROOTS)):
+            return f"this bot writes only inside {', '.join(cfg['write_roots'])} (config/bots.json write_roots)"
+    gate = cfg.get("release_gate") or {}
+    if t in SHELL_TOOLS and gate:
+        import release_gate
+        hit = next((pat for pat in gate.get("patterns", []) if re.search(pat, text)), None)
+        if not hit and gate.get("push_to_main") and release_gate.push_needs_gate(text):
+            hit = "git push to main (or a bare / unparsable push)"
+        if hit and not release_gate.fresh(cfg):
+            return ("merge to main / deploy needs Omer's approval button first: send the review with inline "
+                    "buttons callback_data relok:<slug> / relno:<slug> and wait for his press (valid "
+                    f"{gate.get('window_min', 30)} min). A feature branch may be pushed explicitly: "
+                    f"git push -u origin <branch> (matched {hit!r})")
     if t in SHELL_TOOLS and "contacts_owner" not in caps(cfg) and CONTACT_WRITE.search(text):
         return "contacts (people / people_notes) are read-only for this bot; main Kai owns contact changes"
     return None
