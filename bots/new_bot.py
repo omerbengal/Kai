@@ -166,8 +166,14 @@ def settings(name, caps, cfg=None):
                 # 15/11/2026: a worker's tool call edits its pinned ACK (step + time), bots/ack_live.py
                 {"matcher": "*", "hooks": [
                     {"type": "command", "command": f"{py}/bots/ack_live.py hook --bot {name}", "async": True}]}],
-            "PostToolUse": [{"matcher": "mcp__plugin_telegram_telegram__reply", "hooks": [
-                {"type": "command", "command": f"{py}/bots/bot_tg.py save --bot {name} --mode outgoing"}]}],
+            "PostToolUse": [
+                {"matcher": "mcp__plugin_telegram_telegram__reply", "hooks": [
+                    {"type": "command", "command": f"{py}/bots/bot_tg.py save --bot {name} --mode outgoing"}]},
+                # 15/11/2026: an open foreground call keeps typing until it ends (bot_typing open/close_call)
+                {"matcher": "*", "hooks": [
+                    {"type": "command", "command": f"{typ} post --bot {name}", "async": True}]}],
+            "PostToolUseFailure": [{"matcher": "*", "hooks": [
+                {"type": "command", "command": f"{typ} post --bot {name}", "async": True}]}],
             "Stop": [{"hooks": [
                 {"type": "command", "command": f"{typ} end-turn --bot {name}", "async": True}]}],
         },

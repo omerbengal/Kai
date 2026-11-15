@@ -41,6 +41,12 @@ and stamps its task "bg". A task with a fresh "bg" keeps typing with no tool cal
 pause (after PAUSE_RESUME), until its ACK is deleted (`bot_tg.py delete` ends the task) or BG_HOLD after the
 last background launch - the hard cap, so a dead worker can never leave typing on.
 
+Open tool calls (15/11/2026, Omer msg 3704): a long FOREGROUND call (flutter test / build, minutes) makes no
+other tool call, and ACTIVITY_WINDOW ran out mid-call (trace 23:07:48-23:09:17). The PreToolUse renew hook now
+records the call by tool_use_id, and the PostToolUse / PostToolUseFailure `post` hook closes it. A task with an
+open call keeps typing until it closes, capped at the call's own timeout (Bash/PowerShell `timeout` ms,
+default CALL_DEFAULT, max CALL_MAX) + CALL_MARGIN - an interrupted call that never gets a Post cannot stick.
+
 Never call this by hand from a model; the hooks own it (principle 11).
 """
 import json
@@ -70,6 +76,10 @@ PAUSE_RESUME = 8         # open tasks remain: a tool call this long after a paus
 ACTIVITY_WINDOW = 60     # open tasks keep typing alive this long after the last tool call
 TASK_TTL = 1800          # a task never closed (crashed worker) stops counting after 30 min
 NOACK_TTL = 120          # a task without an ACK (trivial message, answered by a react) after 2 min
+CALL_DEFAULT = 120       # a tool call's own timeout when it names none (Bash default 2 min)
+CALL_MAX = 600           # Bash / PowerShell max timeout
+CALL_MARGIN = 30         # an open call types this long past its timeout at most
+CLOSED_KEEP = 50         # recently closed tool_use_ids (an async Post can land before its Pre)
 BG_HOLD = 1800           # a task waiting on a background process types this long after its last bg launch
 BG_SHELLS = ("Bash", "PowerShell")
 BG_WAIT_TOOLS = ("Monitor",)
@@ -193,10 +203,61 @@ def _bg_tasks(lease, now=None):
             if v.get("bg") and now - float(v["bg"]) < BG_HOLD}
 
 
+def call_cap(tool_name, tool_input):
+    """Seconds an open call may keep typing: its own timeout (ms param, shells only) + CALL_MARGIN."""
+    t = (tool_input or {}).get("timeout") if tool_name in BG_SHELLS else None
+    try:
+        secs = min(max(float(t) / 1000.0, 1), CALL_MAX) if t else CALL_DEFAULT
+    except (TypeError, ValueError):
+        secs = CALL_DEFAULT
+    return secs + CALL_MARGIN
+
+
+def _open_calls(lease, now=None):
+    now = now or time.time()
+    return {k: v for k, v in (lease.get("calls") or {}).items()
+            if now < float(v.get("until", 0) or 0)}
+
+
+def open_call(p, call_id, tool_name, tool_input):
+    """PreToolUse: remember a foreground call until its Post (or its cap). Never opens the lease."""
+    if not call_id or tool_name in SKIP_TOOLS or is_bg_call(tool_name, tool_input):
+        return False
+    now = time.time()
+    with _Lock(p):
+        lease = _read(p)
+        if not lease or not lease.get("turn_open") or call_id in (lease.get("closed") or []):
+            return False
+        calls = _open_calls(lease, now)
+        calls[call_id] = {"tool": tool_name, "start": now, "until": now + call_cap(tool_name, tool_input)}
+        lease["calls"] = calls
+        _write(p, lease)
+    return True
+
+
+def close_call(p, call_id):
+    """PostToolUse / PostToolUseFailure: the call is over."""
+    if not call_id:
+        return
+    now = time.time()
+    with _Lock(p):
+        lease = _read(p)
+        if not lease:
+            return
+        calls = _open_calls(lease, now)
+        calls.pop(call_id, None)
+        lease["calls"] = calls
+        lease["closed"] = ((lease.get("closed") or []) + [call_id])[-CLOSED_KEEP:]
+        lease["last_activity"] = now   # the call just ended: the usual window starts from here
+        _write(p, lease)
+
+
 def _keepalive(lease, now=None):
     now = now or time.time()
     if _bg_tasks(lease, now):
         return True
+    if _tasks(lease, now) and _open_calls(lease, now):
+        return True   # a long foreground call (flutter build) is still running
     return bool(_tasks(lease, now)) and now - float(lease.get("last_activity", 0) or 0) < ACTIVITY_WINDOW
 
 
@@ -535,7 +596,7 @@ def main(argv):
             loop(p)
             return 0
         data = {}
-        if cmd in ("open", "renew", "pause"):
+        if cmd in ("open", "renew", "pause", "post"):
             try:
                 data = json.loads(sys.stdin.buffer.read().decode("utf-8", errors="replace") or "{}")
             except Exception:
@@ -550,12 +611,15 @@ def main(argv):
         elif cmd == "renew":
             if (data.get("tool_name") or "") not in SKIP_TOOLS:
                 renew(p, hold=int(_arg(argv, "--hold", LEASE_SECONDS)))
+            open_call(p, data.get("tool_use_id"), data.get("tool_name") or "", data.get("tool_input"))
             if is_bg_call(data.get("tool_name"), data.get("tool_input")):
                 mark_bg(p, data.get("agent_id"), data.get("transcript_path"), data.get("session_id"))
         elif cmd == "pause":
             ti = data.get("tool_input") or {}
             pause(p, wait_expire="--react" in argv, reply_to=ti.get("reply_to") or ti.get("message_id"),
                   text=ti.get("text"))
+        elif cmd == "post":
+            close_call(p, data.get("tool_use_id"))
         elif cmd == "attach":   # link a manually sent ACK to its task by hand
             attach_ack(p, _arg(argv, "--msg"), _arg(argv, "--ack"))
             print("ok")

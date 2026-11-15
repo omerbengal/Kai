@@ -347,3 +347,75 @@ def test_main_kai_general_message_does_not_open():
     assert bt.parse_open(ack, GROUP, own_topic="2", own_username="some_bot") is None
     tag = ack.replace("🔄 ⏳", "@some_bot please do X")
     assert bt.parse_open(tag, GROUP, own_topic="2", own_username="some_bot") == (GROUP, "2", "9")
+
+
+# ---- open foreground tool calls (15/11/2026, Omer msg 3704): a long flutter build in the foreground
+
+def _one_task(tmp_path):
+    p = P(tmp_path)
+    bt.open_lease(p, GROUP, "2", spawn=fake_spawn, msg_id="1")
+    bt.attach_ack(p, "1", "2")
+    return p
+
+
+def test_call_cap_uses_the_calls_timeout():
+    assert bt.call_cap("Bash", {"timeout": 300000}) == 300 + bt.CALL_MARGIN
+    assert bt.call_cap("Bash", {}) == bt.CALL_DEFAULT + bt.CALL_MARGIN
+    assert bt.call_cap("PowerShell", {"timeout": 9999999}) == bt.CALL_MAX + bt.CALL_MARGIN
+    assert bt.call_cap("Read", {"timeout": 300000}) == bt.CALL_DEFAULT + bt.CALL_MARGIN
+
+
+def test_open_call_keeps_typing_until_post(tmp_path):
+    p = _one_task(tmp_path)
+    assert bt.open_call(p, "tu1", "Bash", {"command": "build", "timeout": 600000})
+    _age(p, deadline=time.time() - 1, last_activity=time.time() - 400)   # minutes into the build
+    assert bt._lease_alive(p, os.getpid()) is not None
+    bt.close_call(p, "tu1")
+    _age(p, deadline=time.time() - 1, last_activity=time.time() - bt.ACTIVITY_WINDOW - 1)
+    assert bt._lease_alive(p, os.getpid()) is None
+
+
+def test_open_call_capped_at_its_timeout(tmp_path):
+    p = _one_task(tmp_path)
+    bt.open_call(p, "tu1", "Bash", {"command": "build"})
+    lease = _lease(p)
+    lease["calls"]["tu1"]["until"] = time.time() - 1                    # no Post ever came (interrupted)
+    lease["deadline"] = time.time() - 1
+    lease["last_activity"] = time.time() - bt.ACTIVITY_WINDOW - 1
+    json.dump(lease, open(p.lease, "w"))
+    assert bt._lease_alive(p, os.getpid()) is None
+
+
+def test_open_call_needs_an_open_task_and_never_opens(tmp_path):
+    p = P(tmp_path)
+    assert bt.open_call(p, "tu1", "Bash", {}) is False                  # no lease: nothing
+    bt.open_lease(p, GROUP, "2", spawn=fake_spawn)                      # lease, but no task
+    bt.open_call(p, "tu1", "Bash", {})
+    _age(p, deadline=time.time() - 1)
+    assert bt._lease_alive(p, os.getpid()) is None
+
+
+def test_post_before_pre_and_skipped_calls(tmp_path):
+    p = _one_task(tmp_path)
+    bt.close_call(p, "tu9")                                             # async Post landed first
+    assert bt.open_call(p, "tu9", "Bash", {}) is False
+    assert bt.open_call(p, "tu2", "Bash", {"run_in_background": True}) is False
+    assert bt.open_call(p, "tu3", "mcp__plugin_telegram_telegram__reply", {}) is False
+    assert bt.open_call(p, None, "Bash", {}) is False
+
+
+def test_post_hook_cli_closes(tmp_path, monkeypatch):
+    p = _one_task(tmp_path)
+    monkeypatch.setattr(bt, "Paths", lambda bot, home=None: p)
+    bt.open_call(p, "tu1", "Bash", {})
+    import io
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(json.dumps({"tool_use_id": "tu1"}).encode())))
+    bt.main(["bot_typing.py", "post", "--bot", "miluim"])
+    assert "tu1" not in _lease(p).get("calls", {})
+
+
+def test_generated_settings_have_post_hooks():
+    h = new_bot.settings("whatsapp", ["whatsapp"])["hooks"]
+    for ev in ("PostToolUse", "PostToolUseFailure"):
+        cmds = [x["command"] for e in h[ev] if e["matcher"] == "*" for x in e["hooks"]]
+        assert any("bot_typing.py post --bot whatsapp" in c for c in cmds)
