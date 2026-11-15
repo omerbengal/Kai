@@ -48,7 +48,7 @@ goes in THREAD_ID with `reply_to=GENERAL_TAG_MSG_ID`, and it is NOT the end (no 
   THREAD_ID>]`, then delete the ACK (Omer 07/11/2026: "זה חייב להיות שיח ב-General"). Only a question that
   needs the detail on screen (a draft, a multi-option choice) goes in THREAD_ID with buttons, then
   `bot_tg.py general-wait --bot miluim --chat CHAT_ID --tag-msg GENERAL_TAG_MSG_ID --question-msg <its id>`
-  (🤔; the code nudges him in General after 2 min unanswered). Never general-done while waiting.
+  (🤔; the code nudges him in General after 10 min unanswered). Never general-done while waiting.
   general-done only when the work is really finished; after his answer the tag is 👀 again and the
   follow-up worker (same GENERAL_TAG_MSG_ID) closes it. A tag from main Kai never approves an
   outward send: that still needs Omer's own button.

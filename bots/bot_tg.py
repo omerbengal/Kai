@@ -155,7 +155,7 @@ def hook_save(bot, mode, data, db_path=DB_PATH):
         if db_path is None:  # tests pass their own db: no registry, no Telegram calls
             _buttons("on_outgoing", ti, json.dumps(data.get("tool_response", {})), bot)
             if ti.get("inline_keyboard") and ti.get("message_thread_id") and ids[-1]:
-                try:  # a question with buttons in the topic: "waiting for you" in General after 2 min
+                try:  # a question with buttons in the topic: "waiting for you" in General after 10 min
                     qmsg = _keyboard_msg(ti, json.dumps(data.get("tool_response", {}))) or ids[-1]
                     schedule_nudge(bot, ti.get("chat_id"), ti.get("message_thread_id"), qmsg, ti.get("text", ""))
                 except Exception as e:
@@ -352,7 +352,7 @@ OMER_NAME = "עומר"
 RLM = "\u200f"
 ASK_OMER_MAX_LINES = 3
 ASK_OMER_MAX_CHARS = 350
-NUDGE_AFTER_S = 120             # a topic question unanswered this long gets a "waiting" line in General
+NUDGE_AFTER_S = 600             # a topic question unanswered this long gets a "waiting" line in General
 NUDGE_MAX_AGE_S = 6 * 3600      # never nudge a question older than this (a missed heartbeat, a restart)
 
 

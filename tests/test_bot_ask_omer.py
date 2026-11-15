@@ -203,21 +203,21 @@ def test_topic_question_nudges_after_two_minutes(bots):
     assert bot_tg.schedule_nudge("trading", GROUP, "117", 650, "\u200fלאשר את העסקה?\n\u200fפרטים", now=T0)
     r = Rec()
     no = lambda *a: False  # noqa: E731
-    assert bot_tg.nudge_due("trading", now=T0 + 100, sender=r.send, answered=no, claim=lambda *a: True) == []
-    sent = bot_tg.nudge_due("trading", now=T0 + 121, sender=r.send, answered=no, claim=lambda *a: True)
+    assert bot_tg.nudge_due("trading", now=T0 + bot_tg.NUDGE_AFTER_S - 20, sender=r.send, answered=no, claim=lambda *a: True) == []
+    sent = bot_tg.nudge_due("trading", now=T0 + bot_tg.NUDGE_AFTER_S + 1, sender=r.send, answered=no, claim=lambda *a: True)
     assert sent == [("650", 901)]
     s = r.sends[0]
     assert s["thread"] is None and mention_of(s) == "עומר" and "https://t.me/c/4297864522/117/650" in s["text"]
     assert "לאשר את העסקה?" in s["text"] and "פרטים" not in s["text"]
     assert bot_tg.load_nudges("trading")["650"]["state"] == "sent"
-    assert bot_tg.nudge_due("trading", now=T0 + 500, sender=r.send, answered=no, claim=lambda *a: True) == []
+    assert bot_tg.nudge_due("trading", now=T0 + bot_tg.NUDGE_AFTER_S + 380, sender=r.send, answered=no, claim=lambda *a: True) == []
 
 
 def test_nudge_cancelled_when_omer_answered_first(bots):
     bot_tg.schedule_nudge("trading", GROUP, "117", 650, "לאשר?", now=T0)
     bot_tg.save("trading", "incoming", GROUP, "117", 655, "כן")
     r = Rec()
-    assert bot_tg.nudge_due("trading", now=T0 + 200, sender=r.send, claim=lambda *a: True) == []
+    assert bot_tg.nudge_due("trading", now=T0 + bot_tg.NUDGE_AFTER_S + 80, sender=r.send, claim=lambda *a: True) == []
     assert r.sends == [] and bot_tg.load_nudges("trading")["650"]["state"] == "cancelled"
 
 
@@ -230,11 +230,11 @@ def test_nudge_claim_prevents_a_double_post(bots):
     bot_tg.schedule_nudge("trading", GROUP, "117", 650, "לאשר?", now=T0)
     r = Rec()
     no = lambda *a: False  # noqa: E731
-    bot_tg.nudge_due("trading", now=T0 + 200, sender=r.send, answered=no)
+    bot_tg.nudge_due("trading", now=T0 + bot_tg.NUDGE_AFTER_S + 80, sender=r.send, answered=no)
     d = bot_tg.load_nudges("trading")
     d["650"]["state"] = "pending"
     bot_tg._save_nudges("trading", d)
-    bot_tg.nudge_due("trading", now=T0 + 200, sender=r.send, answered=no)
+    bot_tg.nudge_due("trading", now=T0 + bot_tg.NUDGE_AFTER_S + 80, sender=r.send, answered=no)
     assert len(r.sends) == 1
 
 
@@ -244,7 +244,7 @@ def test_nudge_replies_to_the_waiting_general_tag(bots):
     bot_tg.general_wait("trading", GROUP, "600", question_msg="650", reactor=Rec().react, schedule=False)
     bot_tg.schedule_nudge("trading", GROUP, "117", 650, "לאשר?", now=T0)
     r = Rec()
-    bot_tg.nudge_due("trading", now=T0 + 200, sender=r.send, answered=lambda *a: False, claim=lambda *a: True)
+    bot_tg.nudge_due("trading", now=T0 + bot_tg.NUDGE_AFTER_S + 80, sender=r.send, answered=lambda *a: False, claim=lambda *a: True)
     assert r.sends[0]["reply_to"] == "600"
     assert bot_tg.load_tags("trading")["600"]["nudge"] == "901"
     # Omer replies to the nudge in General: the original task reopens
@@ -281,7 +281,7 @@ def test_main_skips_omers_reply_to_a_bot_message(bots):
 def test_open_questions_lists_general_asks_and_nudges(bots):
     q = _asked()
     bot_tg.schedule_nudge("trading", GROUP, "117", 650, "לאשר את העסקה?", now=T0)
-    bot_tg.nudge_due("trading", now=T0 + 200, sender=Rec().send, answered=lambda *a: False, claim=lambda *a: True)
+    bot_tg.nudge_due("trading", now=T0 + bot_tg.NUDGE_AFTER_S + 80, sender=Rec().send, answered=lambda *a: False, claim=lambda *a: True)
     qs = bot_tg.open_questions()
     assert ("whatsapp", str(q), "לסכם בכל זאת?") in qs
     assert any(b == "trading" and m == "901" for b, m, _ in qs)
@@ -367,14 +367,14 @@ def test_a_press_saved_under_the_question_id_counts_as_an_answer(bots):
     e = bot_tg.load_nudges("trading")["651"]
     assert bot_tg.question_answered("trading", "651", e)
     r = Rec()
-    assert bot_tg.nudge_due("trading", now=T0 + 200, sender=r.send, claim=lambda *a: True) == []
+    assert bot_tg.nudge_due("trading", now=T0 + bot_tg.NUDGE_AFTER_S + 80, sender=r.send, claim=lambda *a: True) == []
     assert r.sends == []
 
 
 def test_sent_nudge_leaves_open_questions_once_answered(bots):
     bot_tg.save("trading", "outgoing", GROUP, "117", 650, "לפרוס?")
     bot_tg.schedule_nudge("trading", GROUP, "117", 650, "לפרוס?", now=T0)
-    bot_tg.nudge_due("trading", now=T0 + 200, sender=Rec().send, answered=lambda *a: False, claim=lambda *a: True)
+    bot_tg.nudge_due("trading", now=T0 + bot_tg.NUDGE_AFTER_S + 80, sender=Rec().send, answered=lambda *a: False, claim=lambda *a: True)
     assert any(b == "trading" for b, _, _ in bot_tg.open_questions())
     bot_tg.save("trading", "incoming", GROUP, "117", 650, "[callback: y] על: לפרוס?")
     assert not any(b == "trading" for b, _, _ in bot_tg.open_questions())
