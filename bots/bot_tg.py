@@ -1461,6 +1461,11 @@ def main(argv):
             print(f"[bot_tg] {method} failed: {e}")
         if cmd == "delete":
             _typing("end_task", bot, None, msg)
+            try:   # 15/11/2026: the live-ACK hook never edits a deleted ACK (bots/ack_live.py)
+                import ack_live
+                ack_live.mark_done(bot, msg)
+            except Exception:
+                pass
             try:
                 close_on_ack_delete(bot, msg)
             except Exception:

@@ -80,3 +80,21 @@ Group "<bots group>" = `<group-id>`. Tokens: only in `D:/KaiBots/<bot>/telegram_
   typing at once while task 2 is open; open tasks keep typing through a long tool call (60s window). No restart
   needed (the hooks call the script by path; settings unchanged). Live check in 📈 with the real loop: typing
   continued after reply #1, stopped 0.2s after reply #2. Tests: test_bot_typing.py 15.
+
+## Live ACK for bot workers (15/11/2026, appdev tag 3544, Omer topic msg 3540)
+
+- Problem: Omer thought bot workers were stuck: the pinned ACK kept one step for many minutes, because editing it
+  before each step was only an instruction in worker.md.
+- Fix in code: `bots/ack_live.py`, wired by `bots/new_bot.py` into every bot's settings.json as an async
+  PreToolUse hook (matcher `*`). A tool call that carries `agent_id` (= a worker; the dispatcher's own calls never
+  edit) edits that worker's ACK to `🔄 <TITLE> — ⏳ <Bash description / tool label> · עודכן HH:MM` (local time),
+  at most once a minute per ACK and not within a minute of the worker's own edit.
+- Which ACK: the dispatcher's Agent / SendMessage call (ACK_MSG_ID, or a free-form "ACK ... 3550") plus the
+  worker's transcript `<session>/subagents/agent-<agent_id>.jsonl` (newest task message wins, so a follow-up's ACK
+  replaces the first). A follow-up without TITLE takes the title from the worker's own `🔄 <title> — ...` edit.
+- Done: `bot_tg.py delete` calls `ack_live.mark_done`; an edit answered "message not found" closes it too.
+- Stall: `scripts/heartbeat.py` (every minute) runs `ack_live.stall_sweep(bot)` per bot: no tool call for 10 min
+  appends `⚠️ אין תזוזה X דק'` (updated each minute, dropped by the next tool call, gives up after 3h).
+- State `<home>/tmp/ack_live.json`, trace `<home>/tmp/ack_live_trace.log`. Hook settings are hot-reloaded by
+  Claude Code (verified 15/11 with a headless probe), so running bots got it with no restart.
+- Tests: tests/test_ack_live.py (19).

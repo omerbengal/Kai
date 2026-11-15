@@ -462,5 +462,10 @@ if __name__ == "__main__":
                 bot_tg.main_ask_due(_name)
             except Exception as e:
                 print(f"main_ask_due {_name} error: {e}")
+            try:  # 15/11/2026: a bot worker's ACK with no tool call for 10 min = "⚠️ אין תזוזה X דק'"
+                import ack_live
+                ack_live.stall_sweep(_name)
+            except Exception as e:
+                print(f"ack_live stall {_name} error: {e}")
     except Exception as e:
         print(f"nudge sweep error: {e}")

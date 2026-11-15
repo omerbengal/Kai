@@ -162,7 +162,10 @@ def settings(name, caps, cfg=None):
                 {"matcher": "Agent", "hooks": [
                     {"type": "command", "command": f"{typ} renew --hold 60 --bot {name}", "async": True}]},
                 {"matcher": "*", "hooks": [
-                    {"type": "command", "command": f"{typ} renew --bot {name}", "async": True}]}],
+                    {"type": "command", "command": f"{typ} renew --bot {name}", "async": True}]},
+                # 15/11/2026: a worker's tool call edits its pinned ACK (step + time), bots/ack_live.py
+                {"matcher": "*", "hooks": [
+                    {"type": "command", "command": f"{py}/bots/ack_live.py hook --bot {name}", "async": True}]}],
             "PostToolUse": [{"matcher": "mcp__plugin_telegram_telegram__reply", "hooks": [
                 {"type": "command", "command": f"{py}/bots/bot_tg.py save --bot {name} --mode outgoing"}]}],
             "Stop": [{"hooks": [
