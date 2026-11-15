@@ -276,7 +276,7 @@ def _default_chat(bot):
     try:
         import kai_bots
         return kai_bots.bot(bot).get("group_id")
-    except Exception:
+    except (Exception, SystemExit):   # kai_bots.bot() exits on an unknown bot
         return None
 
 
@@ -289,6 +289,10 @@ def register(st, ack, title, chat, now, agent=None):
         a["title"] = title
     if chat:
         a["chat"] = str(chat)
+    elif agent and not a.get("chat"):   # a follow-up block without CHAT_ID: same chat as the agent's last ACK
+        prev = st["acks"].get(st["agents"].get(agent) or "")
+        if prev and prev.get("chat"):
+            a["chat"] = prev["chat"]
     a["seen"] = now
     if agent:
         st["agents"][agent] = str(ack)
