@@ -242,3 +242,108 @@ def test_attach_cli(tmp_path, monkeypatch):
     bt.open_lease(p, GROUP, "2", spawn=fake_spawn, msg_id="1")
     bt.main(["bot_typing.py", "attach", "--bot", "miluim", "--msg", "1", "--ack", "7"])
     assert _lease(p)["tasks"]["1"]["ack"] == "7"
+
+
+# ---- background work (15/11/2026, Omer msg 3688): a worker waiting on a run_in_background process
+
+def _bg_setup(tmp_path):
+    p = P(tmp_path)
+    bt.open_lease(p, GROUP, "2", spawn=fake_spawn, msg_id="1")
+    bt.attach_ack(p, "1", "2")
+    bt.open_lease(p, GROUP, "2", spawn=fake_spawn, msg_id="3")
+    bt.attach_ack(p, "3", "4")
+    json.dump({"acks": {"4": {"ack": "4", "seen": time.time()}}, "agents": {"agentB": "4"}},
+              open(os.path.join(p.dir, "ack_live.json"), "w", encoding="utf-8"))
+    return p
+
+
+def _age(p, **kw):
+    lease = _lease(p)
+    lease.update(kw)
+    json.dump(lease, open(p.lease, "w"))
+
+
+def test_is_bg_call():
+    assert bt.is_bg_call("Bash", {"command": "x", "run_in_background": True})
+    assert bt.is_bg_call("PowerShell", {"run_in_background": True})
+    assert bt.is_bg_call("Monitor", {})
+    assert not bt.is_bg_call("Bash", {"command": "x"})
+    assert not bt.is_bg_call("Read", {"run_in_background": True})
+
+
+def test_bg_marks_only_the_callers_task_via_ack_live_state(tmp_path):
+    p = _bg_setup(tmp_path)
+    assert bt.mark_bg(p, agent_id="agentB", spawn=fake_spawn) == ["3"]
+    tasks = _lease(p)["tasks"]
+    assert tasks["3"].get("bg") and not tasks["1"].get("bg")
+
+
+def test_bg_unknown_agent_marks_every_acked_task(tmp_path):
+    p = _bg_setup(tmp_path)
+    assert sorted(bt.mark_bg(p, agent_id="nobody", spawn=fake_spawn)) == ["1", "3"]
+
+
+def test_bg_keeps_typing_without_tool_calls_until_ack_deleted(tmp_path):
+    p = _bg_setup(tmp_path)
+    bt.mark_bg(p, agent_id="agentB", spawn=fake_spawn)
+    _age(p, deadline=time.time() - 1, last_activity=time.time() - bt.ACTIVITY_WINDOW - 300)
+    assert bt._lease_alive(p, os.getpid()) is not None       # worker's turn ended, render still running
+    bt.end_task(p, ack_id="2", spawn=fake_spawn)              # the other task ends: still typing
+    _age(p, deadline=time.time() - 1, last_activity=time.time() - bt.ACTIVITY_WINDOW - 300)
+    assert bt._lease_alive(p, os.getpid()) is not None
+    bt.end_task(p, ack_id="4", spawn=fake_spawn)              # its ACK deleted: off
+    _age(p, deadline=time.time() - 1)
+    assert bt._lease_alive(p, os.getpid()) is None
+
+
+def test_bg_hard_cap(tmp_path):
+    p = _bg_setup(tmp_path)
+    bt.end_task(p, ack_id="2", spawn=fake_spawn)
+    bt.mark_bg(p, agent_id="agentB", spawn=fake_spawn)
+    lease = _lease(p)
+    lease["tasks"]["3"]["bg"] = time.time() - bt.BG_HOLD - 1
+    lease["deadline"] = time.time() - 1
+    lease["last_activity"] = time.time() - bt.ACTIVITY_WINDOW - 1
+    json.dump(lease, open(p.lease, "w"))
+    assert bt._lease_alive(p, os.getpid()) is None
+
+
+def test_bg_extends_an_old_task_past_task_ttl(tmp_path):
+    p = _bg_setup(tmp_path)
+    lease = _lease(p)
+    lease["tasks"]["3"]["opened"] = time.time() - bt.TASK_TTL - 60   # long video task, render launched now
+    json.dump(lease, open(p.lease, "w"))
+    assert bt.mark_bg(p, agent_id="agentB", spawn=fake_spawn) == ["3"]
+    _age(p, deadline=time.time() - 1, last_activity=time.time() - bt.ACTIVITY_WINDOW - 1)
+    assert bt._lease_alive(p, os.getpid()) is not None
+
+
+def test_bg_loop_waits_through_a_progress_reply_then_resumes(tmp_path):
+    p = _bg_setup(tmp_path)
+    bt.end_task(p, ack_id="2", spawn=fake_spawn)
+    bt.mark_bg(p, agent_id="agentB", spawn=fake_spawn)
+    bt.pause(p)                                               # "rendering, will send soon" reply
+    assert bt._loop_state(p, os.getpid())[0] == "wait"        # loop stays, sends nothing
+    _age(p, paused_at=time.time() - bt.PAUSE_RESUME - 1)
+    assert bt._loop_state(p, os.getpid())[0] == "send"
+
+
+def test_renew_hook_marks_bg(tmp_path, monkeypatch):
+    p = _bg_setup(tmp_path)
+    monkeypatch.setattr(bt, "Paths", lambda bot, home=None: p)
+    monkeypatch.setattr(bt, "_spawn_loop", fake_spawn)
+    monkeypatch.setattr(bt, "renew", lambda *a, **k: True)
+    import io
+    data = {"tool_name": "Bash", "tool_input": {"command": "render", "run_in_background": True},
+            "agent_id": "agentB"}
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(json.dumps(data).encode())))
+    bt.main(["bot_typing.py", "renew", "--bot", "miluim"])
+    assert _lease(p)["tasks"]["3"].get("bg")
+
+
+def test_main_kai_general_message_does_not_open():
+    ack = ('<channel source="plugin:telegram:telegram" chat_id="%s" message_id="9" user_id="%s">🔄 ⏳</channel>'
+           % (GROUP, bt.MAIN_BOT_ID))
+    assert bt.parse_open(ack, GROUP, own_topic="2", own_username="some_bot") is None
+    tag = ack.replace("🔄 ⏳", "@some_bot please do X")
+    assert bt.parse_open(tag, GROUP, own_topic="2", own_username="some_bot") == (GROUP, "2", "9")

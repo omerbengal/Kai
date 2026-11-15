@@ -33,6 +33,14 @@ worker ran with no typing. Now a reply whose text is an ACK (is_ack_text) keeps 
 the PostToolUse save hook (bot_tg.hook_save) attaches the real message id, so `bot_tg.py delete` of that ACK
 ends it like an auto-ACK. By hand: `bot_typing.py attach --bot X --msg <task msg> --ack <ack id>`.
 
+Background work (15/11/2026, Omer msg 3688 via the 2876-topic bot): a worker that starts a background process
+(Bash / PowerShell run_in_background, or Monitor) ends its turn and waits, so no tool call renews the lease
+and typing died after ACTIVITY_WINDOW while a render was still running. Now the renew hook sees that call,
+finds the worker's ACK in bots/ack_live.py's state (agent_id -> ACK, same state file dir, no second tracker)
+and stamps its task "bg". A task with a fresh "bg" keeps typing with no tool calls, and through a reply's
+pause (after PAUSE_RESUME), until its ACK is deleted (`bot_tg.py delete` ends the task) or BG_HOLD after the
+last background launch - the hard cap, so a dead worker can never leave typing on.
+
 Never call this by hand from a model; the hooks own it (principle 11).
 """
 import json
@@ -62,8 +70,12 @@ PAUSE_RESUME = 8         # open tasks remain: a tool call this long after a paus
 ACTIVITY_WINDOW = 60     # open tasks keep typing alive this long after the last tool call
 TASK_TTL = 1800          # a task never closed (crashed worker) stops counting after 30 min
 NOACK_TTL = 120          # a task without an ACK (trivial message, answered by a react) after 2 min
+BG_HOLD = 1800           # a task waiting on a background process types this long after its last bg launch
+BG_SHELLS = ("Bash", "PowerShell")
+BG_WAIT_TOOLS = ("Monitor",)
 SKIP_TOOLS = ("mcp__plugin_telegram_telegram__reply", "mcp__plugin_telegram_telegram__react")
 OMER_DM = os.environ.get("KAI_TELEGRAM_CHAT_ID", "")
+MAIN_BOT_ID = "<REDACTED_SECRET>"   # main Kai's bot user (its own General messages, e.g. its ACKs, are not this bot's work)
 DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 CREATE_NO_WINDOW = 0x08000000
@@ -170,12 +182,73 @@ def _tasks(lease, now=None):
     now = now or time.time()
     t = lease.get("tasks") or {}
     return {k: v for k, v in t.items()
-            if now - float(v.get("opened", 0) or 0) < (TASK_TTL if v.get("ack") else NOACK_TTL)}
+            if now - max(float(v.get("opened", 0) or 0), float(v.get("bg", 0) or 0))
+            < (TASK_TTL if v.get("ack") else NOACK_TTL)}
+
+
+def _bg_tasks(lease, now=None):
+    """Open tasks whose worker is waiting on a background process it launched less than BG_HOLD ago."""
+    now = now or time.time()
+    return {k: v for k, v in _tasks(lease, now).items()
+            if v.get("bg") and now - float(v["bg"]) < BG_HOLD}
 
 
 def _keepalive(lease, now=None):
     now = now or time.time()
+    if _bg_tasks(lease, now):
+        return True
     return bool(_tasks(lease, now)) and now - float(lease.get("last_activity", 0) or 0) < ACTIVITY_WINDOW
+
+
+def is_bg_call(tool_name, tool_input):
+    """A tool call after which the worker may end its turn and wait: a background shell, or Monitor."""
+    ti = tool_input or {}
+    if tool_name in BG_SHELLS:
+        return bool(ti.get("run_in_background"))
+    return tool_name in BG_WAIT_TOOLS
+
+
+def _worker_ack(p, agent_id, transcript_path=None, session_id=None):
+    """The ACK id of the worker that made the call, from bots/ack_live.py's state (agent -> ACK), else its
+    transcript's task block. None when unknown (the dispatcher's own call, or ack_live has no entry)."""
+    if not agent_id:
+        return None
+    try:
+        import ack_live
+        ack = ack_live.load(p.dir)["agents"].get(agent_id)
+        if not ack:
+            ack = ack_live.block_from_transcript(
+                ack_live.agent_transcript(transcript_path, session_id, agent_id))[0]
+        return str(ack) if ack else None
+    except Exception:
+        return None
+
+
+def mark_bg(p, agent_id=None, transcript_path=None, session_id=None, spawn=_spawn_loop, ack=None):
+    """A background launch: stamp the caller's task (by its ACK) "bg". Unknown ACK = every open task that
+    has an ACK (each still ends on its own ACK delete). Returns the stamped msg ids."""
+    ack = ack or _worker_ack(p, agent_id, transcript_path, session_id)
+    now = time.time()
+    with _Lock(p):
+        lease = _read(p)
+        if not lease or not lease.get("turn_open"):
+            return []
+        tasks = _tasks(lease, now)
+        # the caller's own task counts even past TASK_TTL: its worker is alive, it just made this call
+        raw = lease.get("tasks") or {}
+        hit = [k for k, v in raw.items() if ack and str(v.get("ack")) == ack]
+        for k in hit:
+            tasks[k] = raw[k]
+        if not hit:
+            hit = [k for k, v in tasks.items() if v.get("ack") not in (None, "", "pending")]
+        for k in hit:
+            tasks[k]["bg"] = now
+        lease["tasks"] = tasks
+        if hit:
+            lease = _ensure_loop(p, lease, spawn)
+        _write(p, lease)
+    _tlog(p, "BG", f"ack={ack} agent={agent_id} tasks={','.join(hit) or '-'}")
+    return hit
 
 
 def _resume(p, lease, spawn, now):
@@ -328,16 +401,25 @@ def pause(p, wait_expire=False, reply_to=None, text=None):
     _tlog(p, "PAUSE", "react" if wait_expire else "")
 
 
-def _lease_alive(p, my_pid):
+def _loop_state(p, my_pid):
+    """(state, lease): "send", "wait" (a background task holds the loop through a reply's pause), or None."""
     lease = _read(p)
     if not lease or int(lease.get("pid", 0) or 0) != my_pid:
-        return None
+        return None, None
     now = time.time()
     if float(lease.get("deadline", 0) or 0) > now:
-        return lease
-    if not lease.get("paused_at") and _keepalive(lease, now):
-        return lease   # open tasks, a long tool call in progress
-    return None
+        return "send", lease
+    paused_at = float(lease.get("paused_at", 0) or 0)
+    if not paused_at and _keepalive(lease, now):
+        return "send", lease   # open tasks: a long tool call, or a worker waiting on a background process
+    if paused_at and _bg_tasks(lease, now):
+        return ("send" if now - paused_at >= PAUSE_RESUME else "wait"), lease
+    return None, None
+
+
+def _lease_alive(p, my_pid):
+    state, lease = _loop_state(p, my_pid)
+    return lease if state == "send" else None
 
 
 def send_typing(p, chat_id, thread_id=None):
@@ -376,11 +458,12 @@ def loop(p, sender=send_typing, sleep=time.sleep):
         except Exception:
             pass
         try:
-            lease = _lease_alive(p, my_pid)
-            if not lease:
+            state, lease = _loop_state(p, my_pid)
+            if not state:
                 break
-            sender(p, lease["chat_id"], lease.get("thread_id"))
-            sends += 1
+            if state == "send":
+                sender(p, lease["chat_id"], lease.get("thread_id"))
+                sends += 1
         finally:
             try:
                 os.remove(p.inflight)
@@ -389,7 +472,7 @@ def loop(p, sender=send_typing, sleep=time.sleep):
         stopped = False
         for _ in range(SEND_EVERY):
             sleep(1)
-            if not _lease_alive(p, my_pid):
+            if not _loop_state(p, my_pid)[0]:
                 stopped = True
                 break
         if stopped:
@@ -427,6 +510,10 @@ def parse_open(prompt, group_id, own_topic=None, own_username=None):
         if not thread and chat == str(group_id) and "@nova_personalassistant_bengi_bot" in body \
                 and not (own_username and f"@{own_username.lower()}" in body):
             continue   # Omer tagged main Kai in General (08/11/2026): main's work, this bot never types
+        if not thread and chat == str(group_id) and own_username \
+                and attr("user_id") in (_other_bot_ids() | {MAIN_BOT_ID}) \
+                and f"@{own_username.lower()}" not in body:
+            continue   # another bot's General message not addressed to this bot (main Kai's own ACK, 15/11)
         if not thread and chat == str(group_id) and own_topic:
             thread = str(own_topic)
         return chat, thread, attr("message_id")
@@ -463,6 +550,8 @@ def main(argv):
         elif cmd == "renew":
             if (data.get("tool_name") or "") not in SKIP_TOOLS:
                 renew(p, hold=int(_arg(argv, "--hold", LEASE_SECONDS)))
+            if is_bg_call(data.get("tool_name"), data.get("tool_input")):
+                mark_bg(p, data.get("agent_id"), data.get("transcript_path"), data.get("session_id"))
         elif cmd == "pause":
             ti = data.get("tool_input") or {}
             pause(p, wait_expire="--react" in argv, reply_to=ti.get("reply_to") or ti.get("message_id"),
