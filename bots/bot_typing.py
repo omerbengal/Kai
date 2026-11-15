@@ -47,6 +47,15 @@ records the call by tool_use_id, and the PostToolUse / PostToolUseFailure `post`
 open call keeps typing until it closes, capped at the call's own timeout (Bash/PowerShell `timeout` ms,
 default CALL_DEFAULT, max CALL_MAX) + CALL_MARGIN - an interrupted call that never gets a Post cannot stick.
 
+A live task types until its ACK is deleted (15/11/2026, Omer msg 3744 "stops after a minute, then comes back"):
+the two fixes above still tied typing to tool calls, so every other kind of wait broke it - the model writing a
+long file (89s with no hook), a reply's pause (the loop exited and only the next tool call revived it), a failed
+sendChatAction. Now a task that has an ACK (a worker or dispatcher is on it) keeps typing until `bot_tg.py delete`
+of that ACK, through pauses (resumes PAUSE_HOLD after a reply), with these caps: IDLE_CAP with no tool call at
+all (a hung or dead worker) unless an open call / background wait holds it, and TASK_TTL past the last
+activity. Writes retry on Windows' sharing violation (os.replace fails while the loop reads the lease), and a
+failed send is retried once at once.
+
 Never call this by hand from a model; the hooks own it (principle 11).
 """
 import json
@@ -71,7 +80,10 @@ AGENT_HOLD = 60          # renew --hold: background worker spawn gap
 RESUME_GRACE = 10        # after a pause, renew() cannot revive typing for this long
 INFLIGHT_WAIT = 3.5
 TYPING_VISIBLE = 5.5
-SEND_EVERY = 4
+SEND_EVERY = 3  # client shows typing <=5s; 4s + latency gave 5.4s gaps (live, 15/11)
+PAUSE_HOLD = 12          # a live task's typing comes back by itself this long after a reply (95% of final
+                         # replies have their ACK deleted within 8s, so it does not flash after the answer)
+IDLE_CAP = 600           # a live task with no tool call, open call or background wait this long = dead worker
 PAUSE_RESUME = 8         # open tasks remain: a tool call this long after a pause revives typing
 ACTIVITY_WINDOW = 60     # open tasks keep typing alive this long after the last tool call
 TASK_TTL = 1800          # a task never closed (crashed worker) stops counting after 30 min
@@ -127,7 +139,18 @@ def _write(p, lease):
     tmp = p.lease + ".%d.tmp" % os.getpid()
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(lease, f)
-    os.replace(tmp, p.lease)
+    for i in range(50):   # Windows: os.replace is denied while the typing loop has the lease open (a few ms)
+        try:
+            os.replace(tmp, p.lease)
+            return
+        except PermissionError:
+            if i == 49:
+                try:
+                    os.remove(tmp)
+                except Exception:
+                    pass
+                raise
+            time.sleep(0.01)
 
 
 class _Lock:
@@ -191,9 +214,20 @@ def _tasks(lease, now=None):
     """Open tasks, without the ones older than TASK_TTL."""
     now = now or time.time()
     t = lease.get("tasks") or {}
+    act = float(lease.get("last_activity", 0) or 0)
     return {k: v for k, v in t.items()
-            if now - max(float(v.get("opened", 0) or 0), float(v.get("bg", 0) or 0))
-            < (TASK_TTL if v.get("ack") else NOACK_TTL)}
+            if (v.get("ack") and now - max(float(v.get("opened", 0) or 0), float(v.get("bg", 0) or 0), act)
+                < TASK_TTL)
+            or (not v.get("ack") and now - float(v.get("opened", 0) or 0) < NOACK_TTL)}
+
+
+def _live(lease, now=None):
+    """Some task with an ACK is being worked on: an open call, a background wait, or a tool call < IDLE_CAP ago."""
+    now = now or time.time()
+    if not any(v.get("ack") for v in _tasks(lease, now).values()):
+        return False
+    return (now - float(lease.get("last_activity", 0) or 0) < IDLE_CAP or bool(_open_calls(lease, now))
+            or bool(_bg_tasks(lease, now)))
 
 
 def _bg_tasks(lease, now=None):
@@ -258,6 +292,8 @@ def _keepalive(lease, now=None):
         return True
     if _tasks(lease, now) and _open_calls(lease, now):
         return True   # a long foreground call (flutter build) is still running
+    if _live(lease, now):
+        return True   # a task with an ACK: typing until the ACK is deleted
     return bool(_tasks(lease, now)) and now - float(lease.get("last_activity", 0) or 0) < ACTIVITY_WINDOW
 
 
@@ -475,6 +511,8 @@ def _loop_state(p, my_pid):
         return "send", lease   # open tasks: a long tool call, or a worker waiting on a background process
     if paused_at and _bg_tasks(lease, now):
         return ("send" if now - paused_at >= PAUSE_RESUME else "wait"), lease
+    if paused_at and _live(lease, now):
+        return ("send" if now - paused_at >= PAUSE_HOLD else "wait"), lease   # a progress reply, work goes on
     return None, None
 
 
@@ -489,18 +527,41 @@ def send_typing(p, chat_id, thread_id=None):
     if thread_id:
         params["message_thread_id"] = thread_id
     url = f"https://api.telegram.org/bot{bot_tg.token(p.bot)}/sendChatAction"
+    t0 = time.time()
     try:
         with urllib.request.urlopen(url, data=urllib.parse.urlencode(params).encode(), timeout=3) as r:
             body = r.read().decode("utf-8", "replace")
-        if '"ok":true' in body.replace(" ", ""):
-            tmp = p.last_send + ".%d.tmp" % os.getpid()
-            with open(tmp, "w", encoding="utf-8") as f:
-                f.write(repr(time.time()))
-            os.replace(tmp, p.last_send)
-        else:
-            _tlog(p, "send-FAIL", body[:80])
     except Exception as e:
+        _send_log(p, "fail:" + type(e).__name__, time.time() - t0, thread_id)
         _tlog(p, "send-FAIL", type(e).__name__)
+        return False
+    ok = '"ok":true' in body.replace(" ", "")
+    _send_log(p, "ok" if ok else "bad", time.time() - t0, thread_id)
+    if not ok:
+        _tlog(p, "send-FAIL", body[:80])
+        return False
+    try:
+        tmp = p.last_send + ".%d.tmp" % os.getpid()
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(repr(time.time()))
+        os.replace(tmp, p.last_send)
+    except Exception:
+        pass
+    return True
+
+
+def _send_log(p, res, secs, thread_id):
+    """One line per sendChatAction (typing_sends.log, rotated at 256KB): the evidence when typing 'drops'."""
+    try:
+        import datetime
+        path = os.path.join(p.dir, "typing_sends.log")
+        if os.path.exists(path) and os.path.getsize(path) > 256 * 1024:
+            os.replace(path, path + ".1")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("{} pid={} {} {:.2f}s thread={}\n".format(datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3],
+                                                          os.getpid(), res, secs, thread_id))
+    except Exception:
+        pass
 
 
 def loop(p, sender=send_typing, sleep=time.sleep):
@@ -512,6 +573,7 @@ def loop(p, sender=send_typing, sleep=time.sleep):
     else:
         return
     sends = 0
+    misses = 0
     while True:
         try:
             with open(p.inflight, "w") as f:
@@ -520,10 +582,12 @@ def loop(p, sender=send_typing, sleep=time.sleep):
             pass
         try:
             state, lease = _loop_state(p, my_pid)
-            if not state:
+            misses = 0 if state else misses + 1
+            if misses >= 2:   # two checks in a row, never one odd read
                 break
             if state == "send":
-                sender(p, lease["chat_id"], lease.get("thread_id"))
+                if sender(p, lease["chat_id"], lease.get("thread_id")) is False:
+                    sender(p, lease["chat_id"], lease.get("thread_id"))   # a failed send: retry at once
                 sends += 1
         finally:
             try:
@@ -533,7 +597,7 @@ def loop(p, sender=send_typing, sleep=time.sleep):
         stopped = False
         for _ in range(SEND_EVERY):
             sleep(1)
-            if not _loop_state(p, my_pid)[0]:
+            if not _loop_state(p, my_pid)[0] and not _loop_state(p, my_pid)[0]:
                 stopped = True
                 break
         if stopped:

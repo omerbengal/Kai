@@ -149,9 +149,9 @@ def test_open_tasks_keep_typing_through_a_long_tool_call(tmp_path):
     lease["deadline"] = time.time() - 1                    # 15s lease ran out mid Bash call
     json.dump(lease, open(p.lease, "w"))
     assert bt._lease_alive(p, os.getpid()) is not None
-    lease["last_activity"] = time.time() - bt.ACTIVITY_WINDOW - 1
+    lease["last_activity"] = time.time() - bt.IDLE_CAP - 1
     json.dump(lease, open(p.lease, "w"))
-    assert bt._lease_alive(p, os.getpid()) is None         # bounded: no tool call for a minute = off
+    assert bt._lease_alive(p, os.getpid()) is None         # bounded: no tool call for IDLE_CAP (dead worker) = off
 
 
 def test_ackless_task_closes_on_reply_and_does_not_resume(tmp_path):
@@ -286,10 +286,10 @@ def test_bg_unknown_agent_marks_every_acked_task(tmp_path):
 def test_bg_keeps_typing_without_tool_calls_until_ack_deleted(tmp_path):
     p = _bg_setup(tmp_path)
     bt.mark_bg(p, agent_id="agentB", spawn=fake_spawn)
-    _age(p, deadline=time.time() - 1, last_activity=time.time() - bt.ACTIVITY_WINDOW - 300)
+    _age(p, deadline=time.time() - 1, last_activity=time.time() - bt.IDLE_CAP - 300)
     assert bt._lease_alive(p, os.getpid()) is not None       # worker's turn ended, render still running
     bt.end_task(p, ack_id="2", spawn=fake_spawn)              # the other task ends: still typing
-    _age(p, deadline=time.time() - 1, last_activity=time.time() - bt.ACTIVITY_WINDOW - 300)
+    _age(p, deadline=time.time() - 1, last_activity=time.time() - bt.IDLE_CAP - 300)
     assert bt._lease_alive(p, os.getpid()) is not None
     bt.end_task(p, ack_id="4", spawn=fake_spawn)              # its ACK deleted: off
     _age(p, deadline=time.time() - 1)
@@ -303,7 +303,7 @@ def test_bg_hard_cap(tmp_path):
     lease = _lease(p)
     lease["tasks"]["3"]["bg"] = time.time() - bt.BG_HOLD - 1
     lease["deadline"] = time.time() - 1
-    lease["last_activity"] = time.time() - bt.ACTIVITY_WINDOW - 1
+    lease["last_activity"] = time.time() - bt.IDLE_CAP - 1
     json.dump(lease, open(p.lease, "w"))
     assert bt._lease_alive(p, os.getpid()) is None
 
@@ -314,7 +314,7 @@ def test_bg_extends_an_old_task_past_task_ttl(tmp_path):
     lease["tasks"]["3"]["opened"] = time.time() - bt.TASK_TTL - 60   # long video task, render launched now
     json.dump(lease, open(p.lease, "w"))
     assert bt.mark_bg(p, agent_id="agentB", spawn=fake_spawn) == ["3"]
-    _age(p, deadline=time.time() - 1, last_activity=time.time() - bt.ACTIVITY_WINDOW - 1)
+    _age(p, deadline=time.time() - 1, last_activity=time.time() - bt.IDLE_CAP - 1)
     assert bt._lease_alive(p, os.getpid()) is not None
 
 
@@ -371,7 +371,7 @@ def test_open_call_keeps_typing_until_post(tmp_path):
     _age(p, deadline=time.time() - 1, last_activity=time.time() - 400)   # minutes into the build
     assert bt._lease_alive(p, os.getpid()) is not None
     bt.close_call(p, "tu1")
-    _age(p, deadline=time.time() - 1, last_activity=time.time() - bt.ACTIVITY_WINDOW - 1)
+    _age(p, deadline=time.time() - 1, last_activity=time.time() - bt.IDLE_CAP - 1)
     assert bt._lease_alive(p, os.getpid()) is None
 
 
@@ -381,7 +381,7 @@ def test_open_call_capped_at_its_timeout(tmp_path):
     lease = _lease(p)
     lease["calls"]["tu1"]["until"] = time.time() - 1                    # no Post ever came (interrupted)
     lease["deadline"] = time.time() - 1
-    lease["last_activity"] = time.time() - bt.ACTIVITY_WINDOW - 1
+    lease["last_activity"] = time.time() - bt.IDLE_CAP - 1
     json.dump(lease, open(p.lease, "w"))
     assert bt._lease_alive(p, os.getpid()) is None
 
@@ -419,3 +419,62 @@ def test_generated_settings_have_post_hooks():
     for ev in ("PostToolUse", "PostToolUseFailure"):
         cmds = [x["command"] for e in h[ev] if e["matcher"] == "*" for x in e["hooks"]]
         assert any("bot_typing.py post --bot whatsapp" in c for c in cmds)
+
+
+# ---- a task with an ACK types until its ACK is deleted (15/11/2026, Omer msg 3744)
+
+def test_live_task_types_through_a_long_think_without_tool_calls(tmp_path):
+    p = _one_task(tmp_path)
+    _age(p, deadline=time.time() - 1, last_activity=time.time() - 90)       # model writing a long file
+    assert bt._lease_alive(p, os.getpid()) is not None
+
+
+def test_ackless_task_still_stops_after_the_activity_window(tmp_path):
+    p = P(tmp_path)
+    bt.open_lease(p, GROUP, "2", spawn=fake_spawn, msg_id="1")              # trivial message, no ACK
+    _age(p, deadline=time.time() - 1, last_activity=time.time() - bt.ACTIVITY_WINDOW - 1)
+    assert bt._lease_alive(p, os.getpid()) is None
+
+
+def test_progress_reply_waits_then_resumes_by_itself(tmp_path):
+    p = _one_task(tmp_path)
+    bt.pause(p, reply_to="1")                       # mid-work reply: the task keeps its ACK
+    assert bt._loop_state(p, os.getpid())[0] == "wait"
+    _age(p, paused_at=time.time() - bt.PAUSE_HOLD - 1)
+    assert bt._loop_state(p, os.getpid())[0] == "send"
+    bt.end_task(p, ack_id="2", spawn=fake_spawn)    # ACK deleted: off for good
+    assert bt._loop_state(p, os.getpid())[0] is None
+
+
+def test_write_retries_while_the_lease_is_open_elsewhere(tmp_path):
+    import threading
+    p = _one_task(tmp_path)
+    f = open(p.lease)                               # the loop reading the lease (Windows denies os.replace)
+    threading.Timer(0.1, f.close).start()
+    bt.end_task(p, ack_id="2", spawn=fake_spawn)
+    assert _lease(p)["tasks"] == {}
+
+
+def test_loop_retries_a_failed_send_and_survives_one_bad_read(tmp_path, monkeypatch):
+    p = _one_task(tmp_path)
+    _age(p, pid=os.getpid(), deadline=time.time() - 1)
+    calls = []
+
+    def sender(pp, c, t):
+        calls.append(1)
+        return len(calls) != 1                      # the first send fails
+    real = bt._read
+    reads = {"n": 0}
+
+    def flaky(pp):
+        reads["n"] += 1
+        return None if reads["n"] == 3 else real(pp)
+    monkeypatch.setattr(bt, "_read", flaky)
+    n = {"s": 0}
+
+    def sleeper(_):
+        n["s"] += 1
+        if n["s"] == 6:
+            bt.end_task(p, ack_id="2", spawn=fake_spawn)
+    bt.loop(p, sender=sender, sleep=sleeper)
+    assert len(calls) >= 3                          # fail + immediate retry + the next cycle (bad read ignored)
