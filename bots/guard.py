@@ -141,6 +141,8 @@ def check(name, tool, tool_input, config_path=kai_bots.CONFIG):
         hit = next((pat for pat in pats if re.search(pat, text)), None)
         if hit and release_gate.free_deploy(text, gate.get("free_deploy_functions", [])):
             hit = None  # the exact preview deploy (apiPreview), Omer's rule 15/11/2026
+        if hit and gate.get("free_hosting_preview") and release_gate.free_hosting_preview(text):
+            hit = None  # a Hosting preview channel upload, never live (appdev msg 3717, 15/11/2026)
         if not hit and gate.get("push_to_main") and release_gate.push_needs_gate(text):
             hit = "git push to main (or a bare / unparsable push)"
         if hit and not release_gate.fresh(cfg):

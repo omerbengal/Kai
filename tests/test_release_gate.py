@@ -15,8 +15,9 @@ HOME = tempfile.mkdtemp(prefix="relgate_").replace("\\", "/")
 CFG = {"bots": {
     "shz": {"home": HOME, "caps": [], "group_id": "-100123",
             "write_roots": [HOME, "C:/Users/Omer/.claude/projects/D--KaiBots-shz"],
-            "release_gate": {"patterns": [r"\bfirebase\b[^|;&]*\bdeploy\b", r"\bgh\s+pr\s+merge\b"],
-                             "free_deploy_functions": ["apiPreview"],
+            "release_gate": {"patterns": [r"\bfirebase\b[^|;&]*\bdeploy\b", r"\bgh\s+pr\s+merge\b",
+                                          r"\bfirebase\b[^|;&]*\bhosting:(?:clone|channel:delete|disable)\b"],
+                             "free_deploy_functions": ["apiPreview"], "free_hosting_preview": True,
                              "push_to_main": True, "window_min": 30}},
     "other": {"home": "D:/KaiBots/other", "caps": []},
 }}
@@ -128,6 +129,48 @@ def test_preview_deploy_is_free_and_nothing_else():
         assert chk("Bash", command=bad), bad
 
 
+def test_hosting_preview_channel_is_free_and_nothing_else():
+    """15/11/2026 (msg 3717): only a Hosting PREVIEW channel upload skips Omer's button, never live."""
+    _clear()
+    wt = "D:/KaiBots/shz/App/.claude/worktrees/tasks-search-keyboard"
+    for ok in ["firebase hosting:channel:deploy tasks-search-keyboard --expires 7d",
+               f"cd {wt} && firebase hosting:channel:deploy tasks-search-keyboard --expires 7d 2>&1 | tail -8",
+               f'cd "{wt}"; firebase hosting:channel:deploy pr_12 --expires=30d | tail -n 20',
+               "firebase hosting:channel:deploy fix-1 --expires 12h",
+               "firebase hosting:channel:deploy fix-1 --expires 7d --project my-app-123",
+               "firebase hosting:channel:deploy fix-1 --project=my-app --expires 1d",
+               "firebase hosting:channel:deploy livefix --expires 7d"]:
+        assert chk("Bash", command=ok) is None, ok
+    for bad in ["firebase hosting:channel:deploy live --expires 7d",
+                "firebase hosting:channel:deploy LIVE --expires 7d",
+                "firebase hosting:channel:deploy fix-1",
+                "firebase hosting:channel:deploy fix-1 --expires 31d",
+                "firebase hosting:channel:deploy fix-1 --expires 0d",
+                "firebase hosting:channel:deploy fix-1 --expires 7w",
+                "firebase hosting:channel:deploy fix-1 --expires 7d --only hosting",
+                "firebase hosting:channel:deploy fix-1 --only hosting:site2 --expires 7d",
+                "firebase hosting:channel:deploy fix-1 --expires 7d --force",
+                "firebase hosting:channel:deploy fix-1 fix-2 --expires 7d",
+                "firebase hosting:channel:deploy fix.1 --expires 7d",
+                "firebase hosting:channel:deploy $(echo live) --expires 7d",
+                "firebase hosting:channel:deploy fix-1 --expires 7d --project a --project b",
+                "firebase deploy --only hosting",
+                "firebase deploy --only hosting:fix-1",
+                "firebase deploy",
+                "firebase hosting:clone app:fix-1 app:live",
+                "firebase hosting:channel:delete fix-1 --force",
+                "firebase hosting:disable",
+                "firebase hosting:channel:deploy fix-1 --expires 7d; firebase deploy",
+                "firebase hosting:channel:deploy fix-1 --expires 7d && firebase hosting:clone a:b a:live",
+                "firebase hosting:channel:deploy fix-1 --expires 7d || firebase deploy --only hosting",
+                "firebase hosting:channel:deploy fix-1 --expires 7d | sh",
+                "firebase hosting:channel:deploy fix-1 --expires 7d\nfirebase deploy --only hosting",
+                f"cd {wt} && git push origin main && firebase hosting:channel:deploy fix-1 --expires 7d",
+                "cd x && cd y && firebase hosting:channel:deploy fix-1 --expires 7d",
+                "cd $(firebase deploy) && firebase hosting:channel:deploy fix-1 --expires 7d"]:
+        assert chk("Bash", command=bad), bad
+
+
 def test_real_config_patterns_are_live():
     """config/bots.json once held "\\bfirebase" = a JSON backspace, so no deploy was gated at all (15/11/2026)."""
     import kai_bots
@@ -142,6 +185,10 @@ def test_real_config_patterns_are_live():
         assert c("firebase deploy --only firestore:rules")
         assert c("gh pr merge 3 --squash")
         assert c("firebase deploy --only functions:apiPreview") is None
+        assert c("firebase hosting:channel:deploy fix-1 --expires 7d") is None
+        assert c("firebase hosting:channel:deploy live --expires 7d")
+        assert c("firebase hosting:clone a:fix-1 a:live")
+        assert c("firebase deploy --only hosting")
     finally:
         release_gate.fresh = real_fresh
 

@@ -99,6 +99,25 @@ def free_deploy(cmd, names):
     return re.fullmatch(pat, cmd.lower()) is not None
 
 
+_CHANNEL = r"(?!live(?:[ \t]|$))[a-z0-9_-]+"
+_EXPIRES = r"--expires(?:[ \t]+|=)(?:(?:[1-9]|[12]\d|30)d|(?:[1-9]|1\d|2[0-4])h)"
+_PROJECT = r"--project(?:[ \t]+|=)[a-z0-9-]+"
+
+
+def free_hosting_preview(cmd):
+    """True only for a Hosting PREVIEW channel upload, never live (15/11/2026, appdev msg 3717):
+    `firebase hosting:channel:deploy <channel> --expires <1-30d|1-24h>` with an optional `--project <id>`
+    (before or after --expires), the same optional `cd <dir> &&` before and `2>&1 | tail -N` after as
+    free_deploy. A channel named live, --only, any other flag, hosting:clone / channel:delete or any chained
+    command = False."""
+    if not cmd:
+        return False
+    flags = r"(?:[ \t]+" + _EXPIRES + r"(?:[ \t]+" + _PROJECT + r")?|[ \t]+" + _PROJECT + r"[ \t]+" + _EXPIRES + r")"
+    pat = (r"[ \t]*(?:" + _CD + r")?firebase[ \t]+hosting:channel:deploy[ \t]+" + _CHANNEL + flags +
+           r"(?:[ \t]+2>&1)?(?:[ \t]*\|[ \t]*tail[ \t]+-(?:n[ \t]*)?\d+)?[ \t]*")
+    return re.fullmatch(pat, cmd.lower()) is not None
+
+
 def hook(bot, prompt, cfg=None, now=None):
     import auto_ack as main_ack  # D:/Kai/scripts
     cfg = cfg or kai_bots.bot(bot)
