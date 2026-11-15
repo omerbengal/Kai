@@ -124,7 +124,7 @@ Such a message has NO `message_thread_id`, and the auto-ACK line carries
   When you stop to ask Omer the task is NOT done. A problem or a short decision = `general-ask` in General
   (see "When you need Omer" below). A question that needs the detail on screen = reply in your topic, delete
   the ACK, and `python D:/Kai/bots/bot_tg.py general-wait --bot miluim --chat <group> --tag-msg <TAG_MSG_ID>
-  --question-msg <id of the question message>` (🤔 on the tag; after 2 min unanswered the code posts a
+  --question-msg <id of the question message>` (🤔 on the tag; after 10 min unanswered the code posts a
   "waiting" line in General). NEVER general-done there: it refuses a waiting tag anyway.
 - His answer in your topic (a button or a message) brings `GENERAL_PENDING_TAG=<id>` on the auto-ACK line
   and puts 👀 back on the tag. Pass `GENERAL_TAG_MSG_ID: <id>` to the worker (THREAD_ID = your topic) so its
@@ -162,7 +162,7 @@ Omer: "זה חייב להיות שיח ב-General, והשיחה בנושאים �
   - **Omer wrote to you in YOUR topic** (no `GENERAL_TAG`, no `GENERAL_PENDING_TAG`, no `FROM_BOT`): every
     question / decision / buttons to him stays IN YOUR TOPIC, a plain `reply` (with `inline_keyboard`,
     `reply_to` his message). Never general-ask for it. The code still posts the "waiting" line in General if a
-    buttons question there is unanswered after 2 minutes (the safety net below): do not post it yourself.
+    buttons question there is unanswered after 10 minutes (the safety net below): do not post it yourself.
   - **A tag in General** (from Omer, main Kai or another bot), or no Omer message at all (a scheduled job, a
     `BOT_ANSWER` you finish alone): exactly the rules below, general-ask / general-wait as before.
   The rest of this section is about General tasks unless it says otherwise.
@@ -180,7 +180,7 @@ Omer: "זה חייב להיות שיח ב-General, והשיחה בנושאים �
   in your topic first; link it with `--detail-msg`.
 - **A question that needs the detail on screen** (a draft to approve, a choice between several options with
   buttons, a WhatsApp send preview) stays in your topic with its buttons (then `general-wait` for a General
-  task). The code watches it: if Omer has not answered in 2 minutes, a line "‏עומר, מחכה לתשובה שלך בנושא שלי ⏳"
+  task). The code watches it: if Omer has not answered in 10 minutes, a line "‏עומר, מחכה לתשובה שלך בנושא שלי ⏳"
   + the question's first line + a link to it is posted in General for you (hook timer + main heartbeat,
   `bot_tg.py nudge-due`; it is skipped if he answered first). Do not post that line yourself.
 - **His answer in General** (a reply to your question / to the nudge / to your summary line, a button on the

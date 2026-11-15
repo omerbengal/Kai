@@ -79,11 +79,16 @@ request, one atomic fact per note. Other bots read them only (resolve_name.py).
   (the executor checks that WhatsApp holds the whole text); `failed` with "לא במלואו" = tell Omer what is missing. His press is recorded by a
   hook (`BUS_APPROVAL id=N approved`), the executor sends, `bus.py wait --id N --bot whatsapp` gives the
   result. The signature "[נשלח על ידי קאי 🤖]" is added by code; never write it yourself.
-- **Images with captions** (07/11/2026): the same draft with `--file`: one image =
+- **Files with captions - images AND documents** (images 07/11/2026, any file 13/11/2026, Omer: "לשלוח קבצים
+  לוואטסאפ"): the same draft with `--file`: one file =
   `bus.py draft --from whatsapp --chat C --file <abs path> --text "<caption>" --summary "..."`; several, in
-  order = `--file P1 --caption C1 --file P2 --caption C2 ...` (max 10; jpg/jpeg/png/gif/webp). Show Omer each
-  image (send the files in your topic) with its exact caption above the two buttons. The signature goes only
-  under the last image. A failure mid-series returns "נשלחו k מתוך n" and is never retried automatically.
+  order = `--file P1 --caption C1 --file P2 --caption C2 ...` (max 10, 100 MB each). jpg/jpeg/png/gif/webp go
+  out as photos; any other file (xlsx, pdf, docx, csv, zip...) as a WhatsApp document with its file name.
+  Programs/scripts (.exe .bat .ps1 .js ...), keys and secret-looking names (token, password, .env) are refused
+  by code. The draft output's `items` give each file's `name`, `kind` (image/document) and `size_kb`: show
+  Omer each file (send it in your topic) with its file name and exact caption above the two buttons. The
+  signature goes only under the last file. A failure mid-series returns "נשלחו k מתוך n" and is never retried
+  automatically.
 - **Requests from other bots come as General tags** (06/11/2026, Omer: "חלוקת תפקידים טהורה"): another Kai
   bot posts `@<bot-username> <request>` in General; the auto-ACK line carries `GENERAL_TAG=1 ...
   FROM_BOT=<bot>`. Handle it exactly like main Kai's tag (👀, your topic, general-done), with these extras:
@@ -167,7 +172,7 @@ Such a message has NO `message_thread_id`, and the auto-ACK line carries
   When you stop to ask Omer the task is NOT done. A problem or a short decision = `general-ask` in General
   (see "When you need Omer" below). A question that needs the detail on screen = reply in your topic, delete
   the ACK, and `python D:/Kai/bots/bot_tg.py general-wait --bot whatsapp --chat <group> --tag-msg <TAG_MSG_ID>
-  --question-msg <id of the question message>` (🤔 on the tag; after 2 min unanswered the code posts a
+  --question-msg <id of the question message>` (🤔 on the tag; after 10 min unanswered the code posts a
   "waiting" line in General). NEVER general-done there: it refuses a waiting tag anyway.
 - His answer in your topic (a button or a message) brings `GENERAL_PENDING_TAG=<id>` on the auto-ACK line
   and puts 👀 back on the tag. Pass `GENERAL_TAG_MSG_ID: <id>` to the worker (THREAD_ID = your topic) so its
@@ -205,7 +210,7 @@ Omer: "זה חייב להיות שיח ב-General, והשיחה בנושאים �
   - **Omer wrote to you in YOUR topic** (no `GENERAL_TAG`, no `GENERAL_PENDING_TAG`, no `FROM_BOT`): every
     question / decision / buttons to him stays IN YOUR TOPIC, a plain `reply` (with `inline_keyboard`,
     `reply_to` his message). Never general-ask for it. The code still posts the "waiting" line in General if a
-    buttons question there is unanswered after 2 minutes (the safety net below): do not post it yourself.
+    buttons question there is unanswered after 10 minutes (the safety net below): do not post it yourself.
   - **A tag in General** (from Omer, main Kai or another bot), or no Omer message at all (a scheduled job, a
     `BOT_ANSWER` you finish alone): exactly the rules below, general-ask / general-wait as before.
   The rest of this section is about General tasks unless it says otherwise.
@@ -223,7 +228,7 @@ Omer: "זה חייב להיות שיח ב-General, והשיחה בנושאים �
   in your topic first; link it with `--detail-msg`.
 - **A question that needs the detail on screen** (a draft to approve, a choice between several options with
   buttons, a WhatsApp send preview) stays in your topic with its buttons (then `general-wait` for a General
-  task). The code watches it: if Omer has not answered in 2 minutes, a line "‏עומר, מחכה לתשובה שלך בנושא שלי ⏳"
+  task). The code watches it: if Omer has not answered in 10 minutes, a line "‏עומר, מחכה לתשובה שלך בנושא שלי ⏳"
   + the question's first line + a link to it is posted in General for you (hook timer + main heartbeat,
   `bot_tg.py nudge-due`; it is skipped if he answered first). Do not post that line yourself.
 - **His answer in General** (a reply to your question / to the nudge / to your summary line, a button on the
