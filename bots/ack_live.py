@@ -355,12 +355,16 @@ def handle(bot, data, tmp_dir=None, now=None, editor=None, resolver=None):
             return "skip:dispatcher"
         ack_id = st["agents"].get(agent)
         a = st["acks"].get(ack_id) if ack_id else None
-        stale = a is None or (now - a.get("last_edit", 0) >= THROTTLE_S and not a.get("done"))
-        if stale:   # first sight, or about to edit: read the newest block (a follow-up brings a new ACK)
+        # first sight, or once a minute (also after its ACK is done): read the newest task block, because a
+        # follow-up (SendMessage) brings a new ACK to the same worker (round 8 of appdev, 15/11/2026)
+        stale = a is None or now - a.get("resolved", 0) >= THROTTLE_S
+        if stale:
             ack, title, chat = resolver(agent_transcript(data.get("transcript_path"), data.get("session_id"),
                                                          agent))
             if ack:
                 a = register(st, ack, title, chat, now, agent=agent)
+            if a is not None:
+                a["resolved"] = now
         if a is None:
             save(tmp_dir, st, now)
             return "skip:no_ack"

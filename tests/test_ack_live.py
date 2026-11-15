@@ -206,3 +206,12 @@ def test_follow_up_takes_title_from_the_workers_own_edit(tmp_path):
     call(tmp_path, "Bash", {"description": "flutter test"}, T0 + 70, ed=ed, block=FOLLOW_UP)
     chat, msg, text = ed.calls[-1]
     assert (chat, msg) == (GROUP, "3550") and text.startswith("🔄 סבב 8 — ⏳ flutter test")
+
+
+def test_done_ack_then_follow_up_is_picked_up(tmp_path):
+    ed = Editor()
+    call(tmp_path, "Bash", {"description": "a"}, T0, ed=ed)
+    al.mark_done("demo", "3515", tmp_dir=str(tmp_path), now=T0 + 10)
+    assert call(tmp_path, "Bash", {"description": "b"}, T0 + 20, ed=ed) == "skip:done"
+    assert call(tmp_path, "Bash", {"description": "round 8"}, T0 + 80, ed=ed, block=FOLLOW_UP) == "edit:ok"
+    assert ed.calls[-1][:2] == (GROUP, "3550")
