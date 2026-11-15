@@ -198,3 +198,47 @@ def test_ack_before_open_is_kept_and_bot_without_hooks_never_types(tmp_path):
     spawned = []
     bt.end_task(q, ack_id="2", spawn=lambda pp: spawned.append(1) or 0)
     assert not spawned and bt._lease_alive(q, os.getpid()) is None
+
+
+def test_manual_ack_reply_keeps_the_task_and_its_delete_ends_it(tmp_path, monkeypatch):
+    """15/11/2026 (appdev tag 3346): auto-ACK failed, the bot sent '🔄 ...' itself by reply - typing
+    must last while the worker runs, and the ACK's delete ends the task."""
+    import bot_tg
+    p = P(tmp_path)
+    bt.open_lease(p, GROUP, "2876", spawn=fake_spawn, msg_id="3313")
+    bt.pause(p, reply_to="3313", text="\u200f🔄 סבב 6 — ⏳ מתחיל...")
+    assert _lease(p)["tasks"]["3313"]["ack"] == "pending"
+    monkeypatch.setattr(bt, "Paths", lambda bot, home=None: p)
+    monkeypatch.setattr(bot_tg, "_buttons", lambda *a, **k: None)
+    monkeypatch.setattr(bot_tg, "save", lambda *a, **k: None)
+    monkeypatch.setattr(bot_tg, "settle_on_general_reply", lambda *a, **k: None)
+    bot_tg.hook_save("miluim", "outgoing", {
+        "tool_input": {"chat_id": GROUP, "message_thread_id": "2876", "reply_to": "3313",
+                       "text": "🔄 סבב 6 — ⏳ מתחיל..."},
+        "tool_response": {"content": [{"type": "text", "text": "sent (id: 3314)"}]}}, db_path=None)
+    assert _lease(p)["tasks"]["3313"]["ack"] == "3314"
+    lease = _lease(p)                                   # a long tool call: open task keeps typing
+    lease.update(deadline=0, paused_at=0, last_activity=time.time() - 5, pid=os.getpid())
+    json.dump(lease, open(p.lease, "w"))
+    assert bt._lease_alive(p, os.getpid())
+    assert bt.end_task(p, ack_id="3314", spawn=fake_spawn) == 0
+
+
+def test_manual_ack_never_replaces_a_real_ack_and_plain_reply_still_closes(tmp_path):
+    p = P(tmp_path)
+    bt.open_lease(p, GROUP, "2", spawn=fake_spawn, msg_id="1")
+    bt.attach_ack(p, "1", "2")
+    assert bt.attach_manual_ack(p, "1", "9") is False
+    assert _lease(p)["tasks"]["1"]["ack"] == "2"
+    bt.open_lease(p, GROUP, "2", spawn=fake_spawn, msg_id="5")
+    bt.pause(p, reply_to="5", text="בוקר טוב")
+    assert "5" not in _lease(p)["tasks"]
+    assert bt.is_ack_text("🎤 מתמלל... ⏳") and not bt.is_ack_text("✅ done")
+
+
+def test_attach_cli(tmp_path, monkeypatch):
+    p = P(tmp_path)
+    monkeypatch.setattr(bt, "Paths", lambda bot, home=None: p)
+    bt.open_lease(p, GROUP, "2", spawn=fake_spawn, msg_id="1")
+    bt.main(["bot_typing.py", "attach", "--bot", "miluim", "--msg", "1", "--ack", "7"])
+    assert _lease(p)["tasks"]["1"]["ack"] == "7"

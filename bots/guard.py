@@ -136,7 +136,11 @@ def check(name, tool, tool_input, config_path=kai_bots.CONFIG):
     gate = cfg.get("release_gate") or {}
     if t in SHELL_TOOLS and gate:
         import release_gate
-        hit = next((pat for pat in gate.get("patterns", []) if re.search(pat, text)), None)
+        # a JSON "\b" is a backspace char, not a word boundary (15/11/2026: every config pattern was dead)
+        pats = [p.replace("\x08", r"\b") for p in gate.get("patterns", [])]
+        hit = next((pat for pat in pats if re.search(pat, text)), None)
+        if hit and release_gate.free_deploy(text, gate.get("free_deploy_functions", [])):
+            hit = None  # the exact preview deploy (apiPreview), Omer's rule 15/11/2026
         if not hit and gate.get("push_to_main") and release_gate.push_needs_gate(text):
             hit = "git push to main (or a bare / unparsable push)"
         if hit and not release_gate.fresh(cfg):

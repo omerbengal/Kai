@@ -27,6 +27,12 @@ while tasks are open a tool call PAUSE_RESUME seconds after a pause (not RESUME_
 also keep typing alive between tool calls (a long Bash call) for up to ACTIVITY_WINDOW since the last tool
 call. A task with no ACK (trivial message) closes on a reply to it; a task older than TASK_TTL is dropped.
 
+Manual ACK (15/11/2026, appdev tag 3346): when the auto-ACK fails (URLError) the dispatcher sends its own
+"🔄 ..." ACK by reply. That reply used to count as "a reply to a task with no ACK" and closed the task, so a
+worker ran with no typing. Now a reply whose text is an ACK (is_ack_text) keeps the task (ack="pending"), and
+the PostToolUse save hook (bot_tg.hook_save) attaches the real message id, so `bot_tg.py delete` of that ACK
+ends it like an auto-ACK. By hand: `bot_typing.py attach --bot X --msg <task msg> --ack <ack id>`.
+
 Never call this by hand from a model; the hooks own it (principle 11).
 """
 import json
@@ -202,6 +208,29 @@ def open_lease(p, chat_id, thread_id=None, spawn=_spawn_loop, msg_id=None):
     _tlog(p, "OPEN", f"chat={chat_id} thread={thread_id} msg={msg_id} tasks={len(tasks)}")
 
 
+ACK_PREFIXES = ("🔄", "🎤 מתמלל")
+RTL_MARKS = chr(0x200F) + chr(0x200E)
+
+
+def is_ack_text(text):
+    """True for a status ACK ("🔄 ..." / "🎤 מתמלל..."), the message a dispatcher sends when the auto-ACK failed."""
+    t = (text or "").lstrip(RTL_MARKS + " \n")
+    return t.startswith(ACK_PREFIXES)
+
+
+def attach_manual_ack(p, msg_id, ack_id):
+    """A manual ACK reply was sent: attach it only to a task that has no real ACK yet (never replace one)."""
+    with _Lock(p):
+        lease = _read(p)
+        t = ((lease or {}).get("tasks") or {}).get(str(msg_id))
+        if t is None or t.get("ack") not in (None, "", "pending"):
+            return False
+        t["ack"] = str(ack_id)
+        _write(p, lease)
+    _tlog(p, "ACK-MANUAL", f"msg={msg_id} ack={ack_id}")
+    return True
+
+
 def attach_ack(p, msg_id, ack_id):
     """auto-ACK sent: remember which ACK belongs to which task (its delete ends the task)."""
     with _Lock(p):
@@ -265,9 +294,10 @@ def _last_send(p):
         return 0.0
 
 
-def pause(p, wait_expire=False, reply_to=None):
+def pause(p, wait_expire=False, reply_to=None, text=None):
     """Before a reply / react: typing off now; returns after any in-flight sendChatAction landed.
-    A reply to a task that has no ACK (trivial / inline) is that task's end."""
+    A reply to a task that has no ACK (trivial / inline) is that task's end - unless the reply IS its ACK
+    (a manual one after a failed auto-ACK): then the task stays, ack "pending" until the save hook attaches it."""
     had = False
     with _Lock(p):
         lease = _read(p)
@@ -278,7 +308,10 @@ def pause(p, wait_expire=False, reply_to=None):
             if reply_to:
                 t = (lease.get("tasks") or {}).get(str(reply_to))
                 if t is not None and not t.get("ack"):
-                    lease["tasks"].pop(str(reply_to), None)
+                    if is_ack_text(text):
+                        t["ack"] = "pending"
+                    else:
+                        lease["tasks"].pop(str(reply_to), None)
             _write(p, lease)
     end = time.time() + INFLIGHT_WAIT
     while time.time() < end:
@@ -432,7 +465,11 @@ def main(argv):
                 renew(p, hold=int(_arg(argv, "--hold", LEASE_SECONDS)))
         elif cmd == "pause":
             ti = data.get("tool_input") or {}
-            pause(p, wait_expire="--react" in argv, reply_to=ti.get("reply_to") or ti.get("message_id"))
+            pause(p, wait_expire="--react" in argv, reply_to=ti.get("reply_to") or ti.get("message_id"),
+                  text=ti.get("text"))
+        elif cmd == "attach":   # link a manually sent ACK to its task by hand
+            attach_ack(p, _arg(argv, "--msg"), _arg(argv, "--ack"))
+            print("ok")
         elif cmd == "end-turn":
             _tlog(p, "TURN-END", "lease left to expire")
     except Exception as e:  # a hook must never break the session

@@ -153,6 +153,13 @@ def hook_save(bot, mode, data, db_path=DB_PATH):
             save(bot, "outgoing", ti.get("chat_id"), ti.get("message_thread_id"), mid,
                  ti.get("text", "") if i == 0 else f"[part {i + 1}]", None, None, db_path)
         if db_path is None:  # tests pass their own db: no registry, no Telegram calls
+            if ti.get("reply_to") and ids[0]:
+                try:   # a manual ACK (auto-ACK failed): attach it so typing lasts until its delete (15/11/2026)
+                    import bot_typing
+                    if bot_typing.is_ack_text(ti.get("text", "")):
+                        bot_typing.attach_manual_ack(bot_typing.Paths(bot), ti.get("reply_to"), ids[0])
+                except Exception:
+                    pass
             _buttons("on_outgoing", ti, json.dumps(data.get("tool_response", {})), bot)
             if ti.get("inline_keyboard") and ti.get("message_thread_id") and ids[-1]:
                 try:  # a question with buttons in the topic: "waiting for you" in General after 10 min

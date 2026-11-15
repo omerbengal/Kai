@@ -176,6 +176,17 @@ def main(argv):
 
     print("memory index:", seed_memory(cfg["home"]))
     print("SETUP_OK" + ("" if can_read_all else " WARN_PRIVACY_ON"))
+    try:  # 15/11/2026: appdev + jobs were never added to MAIN's General allowFrom, so their tags of main
+        # were dropped by main's plugin (3232, 3346). Main's access is Omer's to change: print his command.
+        sys.path.insert(0, "D:/Kai/scripts")
+        import allow_bot_handoffs as abh
+        acc = json.load(open(abh.ACCESS, encoding="utf-8"))
+        have = {str(x) for x in acc.get("groups", {}).get(group_id, {}).get("allowFrom", [])}
+        if str(me["result"]["id"]) not in have:
+            print("NEXT_STEP_OMER main Kai drops this bot's tags until Omer runs: "
+                  "python D:/Kai/scripts/allow_bot_handoffs.py --apply")
+    except Exception as e:
+        print(f"[setup_bot] main allowFrom check failed: {e}")
     return 0
 
 

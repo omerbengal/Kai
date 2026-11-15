@@ -16,6 +16,7 @@ CFG = {"bots": {
     "shz": {"home": HOME, "caps": [], "group_id": "-100123",
             "write_roots": [HOME, "C:/Users/Omer/.claude/projects/D--KaiBots-shz"],
             "release_gate": {"patterns": [r"\bfirebase\b[^|;&]*\bdeploy\b", r"\bgh\s+pr\s+merge\b"],
+                             "free_deploy_functions": ["apiPreview"],
                              "push_to_main": True, "window_min": 30}},
     "other": {"home": "D:/KaiBots/other", "caps": []},
 }}
@@ -96,6 +97,53 @@ def test_model_cannot_forge_the_approval():
     assert chk("Bash", command=f"echo {{}} > {HOME}/tmp/release_ok.json")
     assert chk("Write", file_path=f"{HOME}/tmp/release_ok.json", content="{}")
     assert chk("Bash", command="echo x | python D:/Kai/bots/release_gate.py hook --bot shz")
+
+
+def test_preview_deploy_is_free_and_nothing_else():
+    """15/11/2026 (appdev msg 3232): only the exact apiPreview deploy skips Omer's button."""
+    _clear()
+    wt = "D:/KaiBots/shz/AppRepo/.claude/worktrees/team-tasks"
+    for ok in ["firebase deploy --only functions:apiPreview",
+               "  firebase deploy --only=functions:apiPreview  ",
+               f"cd {wt} && firebase deploy --only functions:apiPreview",
+               f"cd {wt}; firebase deploy --only functions:apiPreview 2>&1 | tail -6",
+               f'cd "{wt}" && firebase deploy --only functions:apiPreview | tail -n 20']:
+        assert chk("Bash", command=ok) is None, ok
+    for bad in ["firebase deploy",
+                "firebase deploy --only functions",
+                "firebase deploy --only functions:api",
+                "firebase deploy --only firestore:rules",
+                "firebase deploy --only functions:apiPreview,firestore:rules",
+                "firebase deploy --only functions:apiPreview,functions:api",
+                "firebase deploy --only functions:apiPreviewX",
+                "firebase deploy --only functions:apiPreview --force",
+                "firebase deploy --only functions:apiPreview && firebase deploy --only functions:api",
+                "firebase deploy --only functions:apiPreview; firebase deploy",
+                "firebase deploy --only functions:apiPreview\nfirebase deploy --only functions:api",
+                "firebase deploy --only functions:apiPreview | sh",
+                f"cd {wt} && git push origin main && firebase deploy --only functions:apiPreview",
+                "cd $(firebase deploy) && firebase deploy --only functions:apiPreview",
+                "cd x && cd y && firebase deploy --only functions:apiPreview",
+                "git push origin main; firebase deploy --only functions:apiPreview"]:
+        assert chk("Bash", command=bad), bad
+
+
+def test_real_config_patterns_are_live():
+    """config/bots.json once held "\\bfirebase" = a JSON backspace, so no deploy was gated at all (15/11/2026)."""
+    import kai_bots
+    gate = kai_bots.bot("appdev")["release_gate"]
+    assert not any("\x08" in p for p in gate["patterns"])
+    assert gate.get("free_deploy_functions") == ["apiPreview"]
+    real_fresh = release_gate.fresh
+    release_gate.fresh = lambda cfg, now=None: None
+    try:
+        c = lambda cmd: guard.check("appdev", "Bash", {"command": cmd})
+        assert c("firebase deploy --only functions:api")
+        assert c("firebase deploy --only firestore:rules")
+        assert c("gh pr merge 3 --squash")
+        assert c("firebase deploy --only functions:apiPreview") is None
+    finally:
+        release_gate.fresh = real_fresh
 
 
 def test_write_roots():

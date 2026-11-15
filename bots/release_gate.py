@@ -83,6 +83,22 @@ def push_needs_gate(cmd):
     return False
 
 
+_CD = r"cd[ \t]+(?:\"[^\"$`;&|\n]*\"|'[^'$`;&|\n]*'|[^\s\"'$`;&|]+)[ \t]*(?:&&|;)[ \t]*"
+
+
+def free_deploy(cmd, names):
+    """True only for the exact preview deploy Omer let through without his button (15/11/2026, appdev msg 3232):
+    `firebase deploy --only functions:<name>` for a name in release_gate.free_deploy_functions, optionally after
+    ONE `cd <dir> &&` (or `;`) and optionally followed by `2>&1` and `| tail -N`. A combined --only list
+    (functions:apiPreview,firestore:rules), another target, a flag, or any other command chained in = False."""
+    if not names or not cmd:
+        return False
+    alt = "|".join(re.escape(n.lower()) for n in names)
+    pat = (r"[ \t]*(?:" + _CD + r")?firebase[ \t]+deploy[ \t]+--only(?:[ \t]+|=)functions:(?:" + alt + r")"
+           r"(?:[ \t]+2>&1)?(?:[ \t]*\|[ \t]*tail[ \t]+-(?:n[ \t]*)?\d+)?[ \t]*")
+    return re.fullmatch(pat, cmd.lower()) is not None
+
+
 def hook(bot, prompt, cfg=None, now=None):
     import auto_ack as main_ack  # D:/Kai/scripts
     cfg = cfg or kai_bots.bot(bot)
