@@ -377,3 +377,44 @@ def test_lookup_skips_reaction_echo_row(tmp_path):
     conn.close()
     row = handle_reaction.lookup_message(handle_reaction.get_connection(), 77)
     assert row['direction'] == 'outgoing'
+
+
+# 16/11/2026: one 👍 in General ran handle_reaction once per bot (4-6 parallel writers) and
+# two copies failed with "database is locked" after sqlite's 5s default wait.
+def test_foreign_bot_detection():
+    import handle_reaction as hr
+    assert hr.is_foreign_bot({'KAI_BOT': 'miluim'})
+    assert hr.is_foreign_bot({'TELEGRAM_BOT_TOKEN': '111:other'})
+    assert not hr.is_foreign_bot({'TELEGRAM_BOT_TOKEN': hr.BOT_TOKEN})
+    assert not hr.is_foreign_bot({})
+
+
+def test_domain_bot_copy_exits_without_touching_db(tmp_path, monkeypatch):
+    import handle_reaction as hr
+    db = make_db(tmp_path)
+    monkeypatch.setattr(hr, 'DB_PATH', db)
+    monkeypatch.setenv('KAI_BOT', 'trading')
+    monkeypatch.setattr(sys, 'argv', ['x', '--chat_id', '123', '--message_id', '999', '--reaction', 'x'])
+    called = []
+    monkeypatch.setattr(hr, 'handle_add', lambda *a: called.append(a))
+    monkeypatch.setattr(hr.io, 'TextIOWrapper', lambda b, encoding=None: sys.__stdout__)
+    with pytest.raises(SystemExit) as e:
+        hr.main()
+    assert e.value.code == 0 and called == []
+
+
+def test_waits_for_a_held_write_lock(tmp_path, monkeypatch):
+    """A writer holding the lock for 6s (past the old 5s default) no longer fails the reaction."""
+    import threading, time
+    import handle_reaction as hr
+    db = make_db(tmp_path)
+    c = sqlite3.connect(db)
+    c.execute("INSERT INTO messages (telegram_message_id, direction, text) VALUES (42, 'outgoing', 'hello')")
+    c.commit()
+    monkeypatch.setattr(hr, 'DB_PATH', db)
+    holder = sqlite3.connect(db, isolation_level=None, check_same_thread=False)
+    holder.execute('BEGIN IMMEDIATE')
+    threading.Thread(target=lambda: (time.sleep(6), holder.execute('COMMIT')), daemon=True).start()
+    hr.handle_add(message_id=42, reaction='👍', chat_id='123')
+    row = c.execute("SELECT reactions FROM messages WHERE telegram_message_id = 42").fetchone()
+    assert json.loads(row[0]) == ['👍']

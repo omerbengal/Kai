@@ -41,8 +41,30 @@ def send_telegram_error(chat_id: str, text: str) -> None:
         print(f'[handle_reaction] failed to send error to Telegram: {e}', file=sys.stderr)
 
 
+# Wait this long for another writer's lock instead of failing (sqlite3's default is 5s).
+# 16/11/2026: a 👍 in General hit "database is locked" - see is_foreign_bot().
+DB_TIMEOUT_S = 30
+
+
+def is_foreign_bot(env=None) -> bool:
+    """True when a DOMAIN bot's Telegram plugin launched us, not main Kai's.
+
+    Every Kai bot is in the bots group and gets the same message_reaction update, and each
+    plugin execs this script, so one 👍 in General ran it 4-6 times at once (action_log,
+    10-16/11/2026). The parallel writers queued on kai.db's write lock and on 16/11/2026 two of
+    them waited past sqlite's 5s default and sent Omer "database is locked". Only the main bot
+    owns reminders/tasks, so a domain bot's copy exits at once. The exec'd child inherits the
+    plugin's env: KAI_BOT (start_bot.bat) and the bot's own TELEGRAM_BOT_TOKEN.
+    """
+    env = os.environ if env is None else env
+    if env.get('KAI_BOT'):
+        return True
+    tok = env.get('TELEGRAM_BOT_TOKEN')
+    return bool(tok) and tok != BOT_TOKEN
+
+
 def get_connection() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=DB_TIMEOUT_S)
     conn.text_factory = str
     conn.row_factory = sqlite3.Row
     return conn
@@ -382,6 +404,9 @@ def main():
     parser.add_argument('--reaction', required=True)
     parser.add_argument('--mode', choices=['add', 'remove'], default='add')
     args = parser.parse_args()
+
+    if is_foreign_bot():
+        sys.exit(0)  # main Kai's own plugin handles this reaction
 
     try:
         if args.mode == 'add':
