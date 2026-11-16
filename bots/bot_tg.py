@@ -176,9 +176,14 @@ def hook_save(bot, mode, data, db_path=DB_PATH):
         prompt = data.get("prompt", "") or data.get("content", "")
         _buttons("on_incoming", prompt, bot)
         try:
-            close_topic_question_on_answer(bot, prompt)
+            e = close_topic_question_on_answer(bot, prompt)
+            if e:  # stdout of this UserPromptSubmit hook is injected into the bot session's context
+                out = "<system-reminder>\n" + "\n".join(topic_question_hint(bot, e)) + "\n</system-reminder>\n"
+                sys.stdout.flush()
+                sys.stdout.buffer.write(out.encode("utf-8"))  # utf-8 even on a cp1255 console
+                sys.stdout.flush()
         except Exception as e:
-            print(f"[bot_tg] topic answer close failed: {e}", file=sys.stderr)
+            print(f"[bot_tg] topic answer check failed: {e}", file=sys.stderr)
 
 
 def _keyboard_msg(tool_input, response_str):
@@ -203,11 +208,14 @@ def _question_thread(bot, chat, msg, db_path=DB_PATH):
 
 
 def close_topic_question_on_answer(bot, prompt, api=None, db_path=DB_PATH, reg_db=None):
-    """Omer writes (text or voice) in the bot's own topic after a buttons question there = he answered it
-    (09/11/2026, General msg 1367: a voice answer left the buttons open). The newest open question in that
-    topic loses its buttons and gets "✅ נבחר: ענית בהודעה...". A text that is itself a question ("?") is
-    about the options, not a choice: the buttons stay. A press is button_registry.on_incoming's job.
-    Returns the closed message id, or None."""
+    """Omer writes (text or voice) in the bot's own topic while a buttons question is open there.
+
+    Until 16/11/2026 this closed the question by itself with "ענית בהודעה: <his raw text>", whatever he wrote.
+    Omer (General msg 3879): often the text has nothing to do with the question above it. A hook cannot judge
+    that, so it no longer closes anything: it returns the open question so the hook can hand it to the bot
+    session (topic_question_hint), which decides whether the message answers it and, only if so, closes it
+    with a short summary of his answer. A press, or a text that IS a button, stays button_registry.on_incoming's
+    job. Returns the open question entry (dict with message_id, text, keyboard), or None."""
     import button_registry
     m = re.search(r"<channel([\s\S]*?)>([\s\S]*?)</channel>", prompt or "")
     if not m:
@@ -224,21 +232,29 @@ def close_topic_question_on_answer(bot, prompt, api=None, db_path=DB_PATH, reg_d
         return None
     if str(thread) != str(own_topic(bot)) or str(chat) != str(kai_bots.bot(bot).get("group_id")):
         return None
-    kind = attr("attachment_kind")
-    voice = kind in ("voice", "audio") or body.startswith("(voice message)")
-    if not voice and body.rstrip().endswith("?"):
-        return None
     for e in button_registry.list_open(chat, bot, reg_db):
         if int(e["message_id"]) >= int(msg) or _question_thread(bot, chat, e["message_id"], db_path) != str(thread):
             continue
-        if voice:
-            chosen = "ענית בהודעה קולית 🎤"
-        else:
-            snip = re.sub(r"\s+", " ", body).strip()
-            chosen = "ענית בהודעה: " + (snip if len(snip) <= 40 else snip[:40].rstrip() + "...")
-        button_registry.close(chat, e["message_id"], chosen, bot, api=api, db=reg_db)
-        return e["message_id"]
+        return dict(e, chat_id=chat)
     return None
+
+
+def topic_question_hint(bot, entry):
+    """The system-reminder lines for an open question Omer may (or may not) have just answered."""
+    import button_registry
+    q = re.sub(r"\s+", " ", (entry.get("text") or "").replace("\u200f", "")).strip()
+    q = q if len(q) <= 160 else "..." + q[-160:]
+    labels = " | ".join(button_registry.label_core(b["text"]) for b in button_registry.buttons(entry.get("keyboard")))
+    return [
+        f"OPEN_BUTTONS_QUESTION chat={entry['chat_id']} msg={entry['message_id']}: \"{q}\" [{labels}]",
+        "Before anything else, decide: does Omer's message ANSWER this question?",
+        "- NO (another subject, a new request, a question about the options): leave that message untouched,"
+        " no close, and handle his message as a new, separate request.",
+        f"- YES: close it in your first tool block: python D:/Kai/scripts/button_registry.py close --bot {bot}"
+        f" --chat {entry['chat_id']} --msg {entry['message_id']} --chosen \"ענית בהודעה: <short summary of his"
+        " answer to THIS question, a few words, never his raw text>\" (voice: summarize the transcription;"
+        " his answer is exactly one button = just that button's label).",
+    ]
 
 
 def _buttons(fn, *args):

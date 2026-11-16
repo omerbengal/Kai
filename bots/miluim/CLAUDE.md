@@ -24,10 +24,14 @@ to you exactly as to main Kai.
 - Format: Hebrew, `‏` (RLM) at the start of every line, no em dash, ← not →, one question right above the
   inline buttons. Button presses come back as `[callback: ...]` with `callback_data` in the meta.
 - Buttons = the reply tool's `inline_keyboard` (never `reply_markup`). An answered question loses its buttons
-  and gets `‏✅ נבחר: <choice>`: a press, or a text that is exactly a button, is handled by the hooks. If Omer
-  answers in free text, work out yourself which open question it answers (`python D:/Kai/scripts/button_registry.py
-  open --bot miluim`) and close it: `button_registry.py close --bot miluim --chat C --msg M --chosen "..."`.
-  Ask him (with buttons) only when genuinely unsure.
+  and gets `‏✅ נבחר: <choice>`: a press, or a text that is exactly a button, is handled by the hooks. Any
+  other text or voice from Omer in your topic while a question is open arrives with an `OPEN_BUTTONS_QUESTION`
+  reminder (hook, 16/11/2026). First decide whether his message actually ANSWERS that question. Not an answer
+  (another subject, a new request, a question about the options) = leave the buttons message untouched and
+  handle his message as a new, separate request. An answer = close it: `python D:/Kai/scripts/button_registry.py
+  close --bot miluim --chat C --msg M --chosen "ענית בהודעה: <short summary of his answer to that question>"`,
+  a few words, never his raw text pasted in (Omer, 16/11: "סיכום של ההודעה ששלחתי והיא התשובה"). Other open
+  questions: `button_registry.py open --bot miluim`. Ask him (with buttons) only when genuinely unsure.
 - **Never open a reply with your own name** ("קאי מילואים 🪖", "קאי:" etc.). Telegram already shows the sender name
   above every message, so it appears twice (Omer, 05/11/2026). Start straight with the content.
 - **NEVER call the main Kai's Telegram scripts**: `dispatch_start.py`, `tg_silent_send.py`, `tg_pin.py`,

@@ -398,24 +398,35 @@ def _open_q(bots, msg=650, thread="117"):
     return button_registry, reg
 
 
-def test_voice_answer_in_the_topic_closes_the_buttons(bots):
+def test_voice_in_the_topic_hands_the_question_to_the_session_without_closing(bots):
     br, reg = _open_q(bots)
     api = FakeApi()
     p = chan("655", OMER, "(voice message)", thread="117").replace(" ts=", ' attachment_kind="voice" ts=')
-    assert bot_tg.close_topic_question_on_answer("trading", p, api=api, reg_db=reg) == 650
-    e = br.get(GROUP, 650, "trading", reg)
-    assert e["status"] == "closed" and "קולית" in e["chosen"]
-    assert api.calls[0][0] == "editMessageReplyMarkup"
+    e = bot_tg.close_topic_question_on_answer("trading", p, api=api, reg_db=reg)
+    assert e and int(e["message_id"]) == 650
+    assert br.get(GROUP, 650, "trading", reg)["status"] == "open" and api.calls == []
 
 
-def test_text_answer_closes_but_a_question_about_the_options_does_not(bots):
+def test_free_text_never_closes_by_itself_16_11(bots):
+    """Omer 16/11 (msg 3879): an unrelated text was closed as "ענית בהודעה: <raw text>". The hook now only
+    surfaces the open question; the session judges relevance and closes with a summary."""
     br, reg = _open_q(bots)
-    assert bot_tg.close_topic_question_on_answer("trading", chan("655", OMER, "מה ההבדל?", thread="117"),
-                                                 api=FakeApi(), reg_db=reg) is None
+    for i, text in enumerate(("מה ההבדל?", "תפרוס רק ל-19-20", "תזכיר לי מחר לקנות חלב")):
+        api = FakeApi()
+        e = bot_tg.close_topic_question_on_answer("trading", chan(str(655 + i), OMER, text, thread="117"),
+                                                  api=api, reg_db=reg)
+        assert e and int(e["message_id"]) == 650 and api.calls == []
     assert br.get(GROUP, 650, "trading", reg)["status"] == "open"
-    assert bot_tg.close_topic_question_on_answer("trading", chan("656", OMER, "תפרוס רק ל-19-20", thread="117"),
-                                                 api=FakeApi(), reg_db=reg) == 650
-    assert br.get(GROUP, 650, "trading", reg)["chosen"].startswith("ענית בהודעה: תפרוס")
+
+
+def test_topic_question_hint_tells_the_session_to_judge_and_summarize(bots):
+    br, reg = _open_q(bots)
+    e = bot_tg.close_topic_question_on_answer("trading", chan("655", OMER, "בוא נדבר על משהו אחר", thread="117"),
+                                              api=FakeApi(), reg_db=reg)
+    hint = "\n".join(bot_tg.topic_question_hint("trading", e))
+    assert "msg=650" in hint and "לפרוס?" in hint and "[כן]" in hint
+    assert "ANSWER" in hint and "new, separate request" in hint
+    assert "--bot trading" in hint and "ענית בהודעה: <short summary" in hint
 
 
 def test_topic_answer_close_ignores_presses_other_topics_and_other_senders(bots):
