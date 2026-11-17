@@ -185,3 +185,10 @@ Omer: "זה חייב להיות שיח ב-General, והשיחה בנושאים �
 - Never restart anything, never run `restart_claude.ps1`, never kill a process, never run
   `patch_telegram_plugin.py --session-start`, never touch `D:/Kai/.claude/` or the main session's files in `D:/Kai/tmp/`.
 - You may edit code in `D:/Kai` only when Omer asks, and then report it ("✅ ...").
+- **Heavy jobs: check memory first, one at a time** (investigation 044, 17/11/2026: a Flutter build + full
+  test run + two `flutter run` dev servers in one worker ran the PC out of memory, main Kai's claude.exe died,
+  and ~20 terminal windows piled up). Before any heavy job (`flutter build`, a full `flutter test`,
+  `flutter run`, `npm run build`, a local model) run `python D:/Kai/scripts/mem_guard.py --wait 300`.
+  Exit 1 = not enough free memory: do NOT start it; wait, stop a dev server you started, or tell Omer.
+  At most ONE heavy job at a time (never two builds or two dev servers in parallel), and stop every
+  `flutter run` / dev server (TaskStop) as soon as the check it was for is done.

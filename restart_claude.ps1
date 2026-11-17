@@ -27,7 +27,10 @@ if ($botPIDs) {
 $cmdPidFile = "D:\Kai\tmp\current_cmd_pid.txt"
 $oldCmdPID = $null
 if (Test-Path $cmdPidFile) {
-    $oldCmdPID = (Get-Content $cmdPidFile -Raw).Trim()
+    # [string] cast: Get-Content -Raw returns $null for an EMPTY file, and .Trim() on $null
+    # throws "You cannot call a method on a null-valued expression" (investigation 044).
+    $oldCmdPID = ([string](Get-Content $cmdPidFile -Raw -ErrorAction SilentlyContinue)).Trim()
+    if (-not $oldCmdPID) { $oldCmdPID = $null }
     Write-Host "Captured old cmd.exe PID: $oldCmdPID"
 }
 
@@ -45,8 +48,11 @@ python D:\Kai\scripts\write_session_handoff.py
 # If the caller already wrote the sentinel (e.g. a worker wrote ACK_MSG_ID directly), skip.
 # If nobody wrote it, the sentinel stays empty and the new session deletes nothing.
 $restartMsgId = ""
+$createdEmptySentinel = $false
 if (Test-Path "D:\Kai\tmp\restart_sentinel") {
-    $existing = (Get-Content "D:\Kai\tmp\restart_sentinel" -Raw).Trim()
+    # [string] cast = null-safe: an empty sentinel left by a failed restart crashed 23 restarts
+    # in a row on 17/11/2026 (investigation 044).
+    $existing = ([string](Get-Content "D:\Kai\tmp\restart_sentinel" -Raw -ErrorAction SilentlyContinue)).Trim()
     if ($existing) {
         $restartMsgId = $existing
         Write-Host "Sentinel already set to $restartMsgId by caller — nothing to guess"
@@ -64,6 +70,7 @@ if ($restartMsgId) {
     Write-Host "Saved restart message ID $restartMsgId to sentinel"
 } else {
     New-Item -ItemType File -Path "D:\Kai\tmp\restart_sentinel" -Force | Out-Null
+    $createdEmptySentinel = $true
     Write-Host "No restart message ID found, created empty sentinel"
 }
 
@@ -109,6 +116,12 @@ while ($elapsed -lt $timeout) {
 
 if (-not $confirmed) {
     Write-Host "ERROR: New Claude session did not appear within $timeout seconds. Current session NOT closed."
+    # Only a session that comes up consumes the sentinel. Remove the EMPTY one this run created,
+    # so the next attempt starts clean (investigation 044). A caller's message id is kept.
+    if ($createdEmptySentinel) {
+        Remove-Item "D:\Kai\tmp\restart_sentinel" -Force -ErrorAction SilentlyContinue
+        Write-Host "Removed the empty sentinel this run created"
+    }
     exit 1
 }
 

@@ -100,6 +100,8 @@ See `agents/listener.md` Step 2 for the exact query.
 | `scripts/save_telegram_message.py` | Persist incoming/outgoing Telegram messages to DB |
 | `scripts/patch_telegram_plugin.py` | Auto-patch Telegram plugin to expose reply_to metadata |
 | `scripts/heartbeat.py` | Standalone heartbeat (for Windows Task Scheduler) |
+| `scripts/kai_watchdog.py` | KaiWatchdog (2 min): restarts a dead main session, max 3 attempts then ONE alert with the restart.log error + top memory users + a `watchdog_retry_restart` button; no console windows, "unknown" never restarts (investigation 044). Tests: `tests/test_watchdog_inv044.py` |
+| `scripts/mem_guard.py` | Free-commit check before heavy jobs (Flutter builds, dev servers, local models): exit 1 below 6GB, `--wait 300`, `--status`. Bots run it first (investigation 044) |
 | `scripts/transcribe.py` | Voice-note transcription: local Hebrew service first, Groq `whisper-large-v3` fallback on any failure; logs the engine to `action_log` (`asr_local` / `asr_groq`) |
 | `scripts/asr_server.py` | Local Hebrew ASR (ivrit.ai Whisper turbo on the GPU, `.venv`, 127.0.0.1:8787, `/health`). Task `KaiAsrServer` (logon + every 5 min, IgnoreNew) keeps it up; off = disable the task + stop it, Groq takes over automatically |
 

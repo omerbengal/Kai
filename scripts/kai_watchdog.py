@@ -5,6 +5,7 @@ Runs every 2 minutes. Checks if claude.exe is running.
 If not running, sends Telegram alert, restarts via restart_claude.ps1, and logs to DB.
 """
 
+import json
 import os
 import subprocess
 import sqlite3
@@ -23,35 +24,43 @@ RESTART_TASK = "KaiRestart"          # separate Task Scheduler task = own job ob
 LOCK_FILE = r"D:\Kai\tmp\restart_in_progress"
 DOWN_FILE = r"D:\Kai\tmp\claude_down_cycles"
 LOCK_TTL = 240                       # seconds a restart is considered "in progress"
-ALERT_AFTER_CYCLES = 3               # ~6 min of downtime before shouting "still down"
 CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+# Investigation 044 (17/11/2026): this script runs as pythonw (no console), so EVERY console child it
+# starts without this flag gets its own visible window. On a memory-starved PC those windows stayed
+# open and piled up every 2 minutes ("20 terminals"). Every subprocess call below passes it.
+CREATE_NO_WINDOW = 0x08000000
+
+ATTEMPTS_FILE = "D:/Kai/tmp/claude_restart_attempts"   # restarts triggered in this outage
+GAVE_UP_FILE = "D:/Kai/tmp/claude_restart_gave_up"     # the one "gave up" alert was sent
+RETRY_HANDLED_FILE = "D:/Kai/tmp/watchdog_retry_handled.json"
+RESTART_LOG = "D:/Kai/tmp/restart.log"
+MAX_RESTART_ATTEMPTS = 3            # then stop and ask Omer (button), never loop forever
+RETRY_CALLBACK = "watchdog_retry_restart"
+LOW_MEMORY_GB = 3.0                 # free commit below this = action_log line (once per 30 min)
+
+
+def claude_state():
+    """True = main Kai's claude.exe is alive, False = it is certainly not, None = could not tell.
+
+    psutil reads the process list in-process: no powershell child (= no window, investigation 044)
+    and no 10-second timeout that a starving PC misses. A failed read is None, never False, so
+    the watchdog does not restart a healthy session just because the PC was slow to answer.
+    """
+    try:
+        import psutil
+        pids = set()
+        for p in psutil.process_iter(["name", "pid"]):
+            name = (p.info.get("name") or "").lower()
+            if name == "claude.exe" or name == "claude":
+                pids.add(p.info["pid"])
+    except Exception:
+        return None
+    return main_claude_running(pids)
 
 
 def is_claude_running() -> bool:
-    """Check if claude.exe is in the process list.
-
-    Uses PowerShell Get-Process (NT API) instead of `tasklist /FI` because the
-    latter goes through WMI and hangs >30s on this host, causing the watchdog
-    to falsely conclude claude is dead and trigger restart cascades.
-    """
-    try:
-        result = subprocess.run(
-            [
-                "powershell",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "(Get-Process -Name claude -ErrorAction SilentlyContinue | "
-                "Select-Object -ExpandProperty Id) -join ','",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        pids = {int(p) for p in result.stdout.strip().split(",") if p.strip().isdigit()}
-        return main_claude_running(pids)
-    except Exception:
-        return False
+    """Back-compat wrapper: True only when main Kai is certainly up."""
+    return claude_state() is True
 
 
 def main_claude_running(claude_pids: set, bot_pids: set = None) -> bool:
@@ -116,6 +125,7 @@ def restart_kai() -> str:
         result = subprocess.run(
             ["schtasks", "/run", "/tn", RESTART_TASK],
             capture_output=True, text=True, timeout=20, check=False,
+            creationflags=CREATE_NO_WINDOW,
         )
         if result.returncode == 0:
             return "schtasks"
@@ -263,20 +273,27 @@ def check_telegram_patch():
         subprocess.run(
             ["python", "D:/Kai/scripts/patch_telegram_plugin.py"],
             capture_output=True, timeout=60, check=False,
+            creationflags=CREATE_NO_WINDOW,
         )
     except Exception:
         pass  # watchdog must never crash
 
     # 2. Is the RUNNING plugin process serving patched code?
+    # psutil, not powershell Get-CimInstance: CIM takes minutes on this PC and the powershell child
+    # opened a window every 2 minutes (investigation 044).
+    cmdline = ""
     try:
-        result = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-             "Get-CimInstance Win32_Process -Filter \"Name='bun.exe' OR Name='node.exe'\" | "
-             "Where-Object { $_.CommandLine -like '*claude-plugins-official*telegram*' } | "
-             "ForEach-Object { $_.CommandLine } | Select-Object -First 1"],
-            capture_output=True, text=True, timeout=10, check=False,
-        )
-        cmdline = (result.stdout or "").strip()
+        import psutil
+        for p in psutil.process_iter(["name"]):
+            if (p.info.get("name") or "").lower() not in ("bun.exe", "node.exe"):
+                continue
+            try:
+                c = " ".join(p.cmdline())
+            except Exception:
+                continue
+            if "claude-plugins-official" in c and "telegram" in c:
+                cmdline = c
+                break
     except Exception:
         return
     if not cmdline:
@@ -321,6 +338,187 @@ def check_telegram_patch():
         log_to_db("telegram_patch_broken", f"running server unpatched: {server_path}")
 
 
+# --- investigation 044: give-up cap, retry button, low-memory log ----------------------------------
+
+def last_restart_error(path: str = RESTART_LOG) -> str:
+    """The error line of the LAST run in restart.log (the wrapper mixes UTF-8 and UTF-16 output)."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 60000))
+            raw = f.read()
+    except Exception:
+        return "restart.log לא נקרא"
+    text = raw.replace(b"\x00", b"").decode("utf-8", "replace")
+    lines = []
+    for line in text.splitlines():
+        if len(line) > 6 and all(line[k] == " " for k in range(1, len(line) - 1, 2)):
+            line = line[::2]  # "E R R O R" from a UTF-16 write
+        line = line.strip()
+        if line:
+            lines.append(line)
+    start = 0
+    for k, line in enumerate(lines):
+        if line.startswith("===== RESTART RUN 2"):
+            start = k
+    block = lines[start:]
+    for line in reversed(block):
+        if "CRASHED" in line or "ERROR" in line or "Exception" in line:
+            return line.strip("= ")[:220]
+    return (block[-1].strip("= ")[:220]) if block else "restart.log ריק"
+
+
+def memory_line() -> str:
+    try:
+        import mem_guard
+        st = mem_guard.commit_status()
+        top = mem_guard.top_memory(3)
+        if not st:
+            return "לא הצלחתי לקרוא את מצב הזיכרון"
+        gb = mem_guard.GB
+        return (f"פנוי {st['free'] / gb:.1f}GB מתוך {st['limit'] / gb:.1f}GB. "
+                f"הכי גדולים: {mem_guard.fmt_top(top)}")
+    except Exception:
+        return "לא הצלחתי לקרוא את מצב הזיכרון"
+
+
+def check_low_memory():
+    """One action_log line when free commit drops below LOW_MEMORY_GB (at most once per 30 min), so the
+    next "Kai died" has its cause in the DB and not only in the Windows Event Log."""
+    try:
+        import mem_guard
+        st = mem_guard.commit_status()
+        if not st or st["free"] >= LOW_MEMORY_GB * mem_guard.GB:
+            return
+        conn = sqlite3.connect(DB_PATH)
+        recent = conn.execute(
+            "SELECT 1 FROM action_log WHERE agent='kai_watchdog' AND action='low_memory' "
+            "AND created_at > datetime('now','-30 minutes') LIMIT 1").fetchone()
+        conn.close()
+        if not recent:
+            log_to_db("low_memory", mem_guard.describe(st))
+    except Exception:
+        pass
+
+
+def _tg_api(method: str, payload: dict, timeout: int = 10):
+    req = urllib.request.Request(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/{method}",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+    )
+    return urllib.request.urlopen(req, timeout=timeout)
+
+
+def send_telegram_buttons(text: str, keyboard: list):
+    try:
+        resp = _tg_api("sendMessage", {"chat_id": CHAT_ID, "text": text,
+                                       "reply_markup": {"inline_keyboard": keyboard}})
+        import tg_log  # keeps it in `messages`
+        tg_log.save_response(resp, text)
+    except Exception:
+        pass
+
+
+def main_poller_alive(bot_pids=None) -> bool:
+    """True if a telegram plugin process that is NOT a domain bot's is running (or we cannot tell).
+
+    The retry button is read with a getUpdates PEEK. That is safe only while main Kai's own poller is
+    gone: two pollers on one token make Telegram answer 409 to one of them (investigation #034)."""
+    try:
+        import psutil
+        if bot_pids is None:
+            import kai_bots
+            bot_pids = kai_bots.bot_claude_pids()
+        for p in psutil.process_iter(["name"]):
+            if (p.info.get("name") or "").lower() not in ("bun.exe", "node.exe"):
+                continue
+            try:
+                c = " ".join(p.cmdline()).lower()
+            except Exception:
+                return True  # cannot read it: assume it may be ours
+            if "telegram" not in c:
+                continue
+            try:
+                parents = {x.pid for x in p.parents()}
+            except Exception:
+                parents = set()
+            if parents & set(bot_pids):
+                continue  # a domain bot's poller, other token
+            return True
+        return False
+    except Exception:
+        return True
+
+
+def _load_handled() -> list:
+    try:
+        with open(RETRY_HANDLED_FILE, encoding="utf-8") as f:
+            return list(json.load(f))
+    except Exception:
+        return []
+
+
+def find_retry_press(updates: list, handled: list):
+    """The first unhandled press of the retry button by Omer, or None."""
+    for u in updates or []:
+        cq = u.get("callback_query") or {}
+        if cq.get("data") != RETRY_CALLBACK:
+            continue
+        if str((cq.get("from") or {}).get("id")) != CHAT_ID:
+            continue
+        if cq.get("id") in handled:
+            continue
+        return cq
+    return None
+
+
+def retry_requested() -> bool:
+    """Did Omer press the retry button? Peek only: getUpdates WITHOUT offset (confirms nothing, so the
+    next session still receives the update) and WITHOUT allowed_updates (that parameter is sticky and
+    would change what the plugin receives, see #025)."""
+    if main_poller_alive():
+        return False
+    try:
+        resp = urllib.request.urlopen(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates?timeout=0", timeout=10)
+        updates = json.loads(resp.read().decode("utf-8")).get("result", [])
+    except Exception:
+        return False
+    handled = _load_handled()
+    cq = find_retry_press(updates, handled)
+    if not cq:
+        return False
+    handled = (handled + [cq.get("id")])[-50:]
+    try:
+        with open(RETRY_HANDLED_FILE, "w", encoding="utf-8") as f:
+            json.dump(handled, f)
+    except Exception:
+        pass
+    try:
+        _tg_api("answerCallbackQuery", {"callback_query_id": cq.get("id"), "text": "מנסה ריסטרט 🔄"})
+    except Exception:
+        pass
+    msg = cq.get("message") or {}
+    if msg.get("message_id"):
+        try:
+            _tg_api("editMessageText", {"chat_id": CHAT_ID, "message_id": msg["message_id"],
+                                        "text": (msg.get("text") or "") + "\n‏✅ נבחר: נסה ריסטרט שוב"})
+        except Exception:
+            pass
+    return True
+
+
+def gave_up_text(attempts: int) -> str:
+    return (
+        f"‏❌ קאי לא רץ, ו-{attempts} ניסיונות ריסטרט נכשלו. הפסקתי לנסות כדי לא לפתוח עוד חלונות.\n\n"
+        f"‏🔍 השגיאה האחרונה ב-restart.log:\n{last_restart_error()}\n\n"
+        f"‏🧠 זיכרון: {memory_line()}\n\n"
+        "‏לנסות ריסטרט שוב?"
+    )
+
+
 def main():
     # Claude is deliberately down overnight. Every check below would read that as a
     # crash: it would restart the session within two minutes and push three alerts
@@ -328,22 +526,29 @@ def main():
     # the morning's first real check starts from a clean slate rather than
     # announcing a "recovery" that was really just the scheduled startup.
     if night_mode.should_stand_down("kai_watchdog"):
-        _remove(DOWN_FILE)
-        _remove(LOCK_FILE)
+        for f in (DOWN_FILE, LOCK_FILE, ATTEMPTS_FILE, GAVE_UP_FILE):
+            _remove(f)
         return
 
     check_reaction_channel()
     check_telegram_patch()
+    check_low_memory()
+
+    state = claude_state()
+    if state is None:
+        # Could not read the process list (a starving PC). Unknown is not "down": no restart.
+        log_to_db("check_unknown", "process list unreadable; no action this cycle")
+        return
 
     down_cycles = _read_int(DOWN_FILE)
 
-    if is_claude_running():
+    if state:
         # Claude is up. If we were mid-recovery, report the recovery once, then reset.
         if down_cycles:
             log_to_db("restart_success", f"claude.exe back up after {down_cycles} down cycle(s)")
             send_telegram("✅ קאי חזר לפעול")
-        _remove(DOWN_FILE)
-        _remove(LOCK_FILE)
+        for f in (DOWN_FILE, LOCK_FILE, ATTEMPTS_FILE, GAVE_UP_FILE):
+            _remove(f)
         return
 
     # --- Claude is NOT running ---
@@ -351,47 +556,44 @@ def main():
     _write_int(DOWN_FILE, down_cycles)
 
     # Guard: a restart is already underway — do not stomp it with another one.
+    # NO verdict while it runs: booting a session takes longer than one cycle.
     if restart_in_progress():
         log_to_db("restart_waiting", f"restart already in progress; down_cycles={down_cycles}")
-    else:
-        ts = datetime.now(timezone.utc).isoformat()
-        _write_int(LOCK_FILE, int(datetime.now().timestamp()))
-        if down_cycles == 1:
-            send_telegram("⚠️ קאי לא רץ — מבצע ריסטרט אוטומטי...")
-        try:
-            path = restart_kai()
-            log_to_db("restart_attempt",
-                      f"claude.exe not found at {ts} — triggered via {path}; down_cycles={down_cycles}")
-        except Exception as e:
-            _remove(LOCK_FILE)
-            log_to_db("restart_failed", f"Failed to trigger restart: {e}")
-            send_telegram(f"❌ לא הצלחתי בכלל להפעיל את הריסטרט — {e}")
+        return
+
+    attempts = _read_int(ATTEMPTS_FILE)
+    if attempts >= MAX_RESTART_ATTEMPTS:
+        # Investigation 044: 24 restarts in a row on 17/11, each crashing the same way, every 2 minutes.
+        # After the cap the watchdog stops and asks ONCE; only the button starts another round.
+        if retry_requested():
+            log_to_db("restart_retry_button", f"Omer pressed retry; down_cycles={down_cycles}")
+            attempts = 0
+            _remove(GAVE_UP_FILE)
+        else:
+            if not os.path.exists(GAVE_UP_FILE):
+                send_telegram_buttons(gave_up_text(attempts),
+                                      [[{"text": "🔄 נסה ריסטרט שוב", "callback_data": RETRY_CALLBACK}]])
+                _write_int(GAVE_UP_FILE, int(datetime.now().timestamp()))
+                log_to_db("restart_gave_up",
+                          f"attempts={attempts}; last_error={last_restart_error()}; memory={memory_line()}")
             return
 
-    # NO verdict in this run. Booting a session takes far longer than one cycle,
-    # and the old 15-second single check is what produced the false "restart failed"
-    # alarms. The next cycle (2 min) observes reality instead.
-    #
-    # Genuine-failure path: still down after ALERT_AFTER_CYCLES cycles (~6 min),
-    # alerted at most once per 30 minutes so it never becomes a spam loop.
-    if down_cycles >= ALERT_AFTER_CYCLES:
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            conn.text_factory = str
-            recent = conn.execute(
-                "SELECT 1 FROM action_log WHERE agent='kai_watchdog' "
-                "AND action='still_down_alert' "
-                "AND created_at > datetime('now','-30 minutes') LIMIT 1"
-            ).fetchone()
-            conn.close()
-        except Exception:
-            recent = None
-        if not recent:
-            send_telegram(
-                f"❌ קאי עדיין לא רץ אחרי {down_cycles} ניסיונות ריסטרט (כ-{down_cycles * 2} דקות).\n"
-                "בדוק את D:\\Kai\\tmp\\restart.log כדי לראות איפה הריסטרט נתקע."
-            )
-            log_to_db("still_down_alert", f"down_cycles={down_cycles}")
+    ts = datetime.now(timezone.utc).isoformat()
+    _write_int(LOCK_FILE, int(datetime.now().timestamp()))
+    if down_cycles == 1:
+        send_telegram("⚠️ קאי לא רץ — מבצע ריסטרט אוטומטי...")
+    _write_int(ATTEMPTS_FILE, attempts + 1)
+    try:
+        path = restart_kai()
+        log_to_db("restart_attempt",
+                  f"claude.exe not found at {ts} — triggered via {path}; down_cycles={down_cycles}; "
+                  f"attempt={attempts + 1}/{MAX_RESTART_ATTEMPTS}")
+    except Exception as e:
+        _remove(LOCK_FILE)
+        log_to_db("restart_failed", f"Failed to trigger restart: {e}")
+        if attempts + 1 < MAX_RESTART_ATTEMPTS:
+            send_telegram(f"❌ לא הצלחתי בכלל להפעיל את הריסטרט — {e}")
+        # on the last attempt the give-up alert (next cycle) carries the details
 
 
 if __name__ == "__main__":

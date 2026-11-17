@@ -1021,6 +1021,16 @@ Rules:
 
 ---
 
+### Watchdog retry-restart callback (`watchdog_retry_restart`, investigation 044) - INLINE, no worker
+
+The button sits under the watchdog's "❌ קאי לא רץ, ו-3 ניסיונות ריסטרט נכשלו" alert. While main Kai is down,
+`scripts/kai_watchdog.py` itself reads the press (a getUpdates peek that confirms nothing), answers it, starts a
+new round of restarts and stamps the message `✅ נבחר: נסה ריסטרט שוב`. So if this callback reaches YOU, Kai is
+already running: never run `restart_claude.ps1` for it. Delete the auto-ACK and, only if the message still has
+its button, `edit_message` it to the same text + `\n‏✅ קאי כבר רץ` (no keyboard). Send nothing else.
+
+---
+
 
 
 
