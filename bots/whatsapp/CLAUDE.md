@@ -205,6 +205,14 @@ Such a message has NO `message_thread_id`, and the auto-ACK line carries
   him to its topic); its answer comes later as `BOT_ANSWER`. `BOT_CHATTER` = ignore. `reason=main_tag` = Omer tagged main Kai (even replying to you) = main's: do NOTHING. Never reply to another bot's message
   with `reply`; the only bot-to-bot messages are `ask` and general-done. Main Kai reads ONLY your General messages
   that tag it (`ask --to main`); never address it any other way.
+- **A STOP from main Kai** (19/11/2026, General msgs 5198 / 5201 / 5215: Omer sent a request to you, then
+  told main Kai it was meant for it; both made a transcript). The auto-ACK line says `reason=main_stop
+  STOP_TASK_MSG=<id> STOP_TAG_MSG=<id>` (main Kai: `@<bot-username> 🛑 STOP msg=<id>`). Main Kai now owns that
+  request, so in ONE block: `TaskStop` the worker you spawned for message STOP_TASK_MSG (its task block has it as
+  ORIGINAL_MSG_ID / GENERAL_TAG_MSG_ID; a finished worker = nothing to stop), `bot_tg.py delete` its ACK if it
+  is still there, post NO result and NO summary for it, then `python D:/Kai/bots/bot_tg.py general-done --bot
+  whatsapp --chat <group> --tag-msg <STOP_TASK_MSG> --summary "🛑 עצרתי, קאי הראשי מטפל בזה"` (if it refuses:
+  `bot_tg.py react --bot whatsapp --chat <group> --msg <STOP_TASK_MSG> --emoji 👍`). Nothing else, never argue.
 
 ## When you need Omer: General, with him tagged (07/11/2026, Omer msgs 781 / 791)
 

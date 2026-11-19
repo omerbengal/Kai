@@ -25,6 +25,8 @@ Output (stdout, injected into the model's context), one line per channel block:
     AUTO_ACK message_id=<id> AUTO_ACK_MSG_ID=NONE reason=<trivial|reaction|other_chat>
     AUTO_ACK message_id=<id> AUTO_ACK_MSG_ID=NONE reason=<direct_bot_tag|reply_to_bot> BOT=<name>
         (General: Omer @mentioned a domain bot / replied to its message - the bot owns it, main does nothing)
+    ... REDIRECT_FROM_BOT=<bot> REDIRECTED_MSG=<id>   appended to a normal ACK line when Omer tags main as a reply
+        to his own message that went to that bot (main must stop the bot first, listener.md Step G item 8)
 Nothing at all for prompts without a channel block (cron, system, terminal input).
 
 Idempotent per message: tmp/auto_ack/<key>.ack is created with O_EXCL, so a re-delivered prompt
@@ -190,6 +192,44 @@ def bot_owned(attrs, content):
     except Exception:
         pass
     return None
+BOT_OWNED_LOG = "D:/Kai/tmp/auto_ack_bot_owned.json"   # {General msg id: [bot, ts]} of bot-owned messages
+BOT_OWNED_MAX_AGE_S = 24 * 3600
+
+
+def remember_bot_owned(mid, bot, now=None, path=BOT_OWNED_LOG):
+    """Record that Omer's General message `mid` went to `bot` (reply_to_bot / direct_bot_tag), so a later
+    message of his that tags main as a reply to it is flagged REDIRECT_FROM_BOT. Never raises."""
+    now = now or time.time()
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = {k: v for k, v in json.load(f).items() if now - v[1] < BOT_OWNED_MAX_AGE_S}
+    except Exception:
+        data = {}
+    data[str(mid)] = [bot, now]
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
+def redirect_owner(attrs, content, path=BOT_OWNED_LOG, now=None):
+    """Omer tags main Kai as a reply to his OWN earlier General message that a domain bot took (19/11/2026,
+    msgs 5198 / 5201 / 5215: voice 5198 replied to the WhatsApp bot, then "התכוונתי אליך @main" replying to
+    5198; main worked on it and never stopped the bot = two transcripts). Returns that bot, else None."""
+    try:
+        rt = attrs.get("reply_to_message_id")
+        if not rt or not is_general(attrs) or not mentions_main(content):
+            return None
+        with open(path, encoding="utf-8") as f:
+            hit = json.load(f).get(str(rt))
+        if hit and (now or time.time()) - hit[1] < BOT_OWNED_MAX_AGE_S:
+            return hit[0]
+    except Exception:
+        pass
+    return None
+
+
 BOT_HANDOFF_LOG = "D:/Kai/tmp/bot_handoffs.json"
 BOT_HANDOFF_MAX_PER_HOUR = 6   # all domain bots together; beyond it a bot tag is ignored (loop guard)
 
@@ -333,18 +373,27 @@ def handle(prompt, dry_run=False):
                            " listener.md Step G, bot handoff)")
         tagged = None if from_bot else direct_bot_tag(attrs, content)
         if tagged:
+            if not dry_run:
+                remember_bot_owned(mid, tagged)
             lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=NONE reason=direct_bot_tag BOT={tagged}"
                          f" (Omer tagged {tagged} directly; that bot receives it itself: do NOTHING, no"
                          " reply, no ACK, no tag)")
             continue
         owner = None if from_bot or mentions_main(content) else bot_reply_owner(attrs)
         if owner:
+            if not dry_run:
+                remember_bot_owned(mid, owner)
             lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=NONE reason=reply_to_bot BOT={owner}"
                          f" (Omer is answering {owner}'s message; that bot receives it itself: do NOTHING, no"
                          " reply, no ACK, no tag)")
             continue
         if is_general(attrs) and not dry_run and not from_bot:
             lines.extend(open_bot_questions())
+        redirected = None if from_bot else redirect_owner(attrs, content)
+        if redirected:
+            handoff_tag += (f" REDIRECT_FROM_BOT={redirected} REDIRECTED_MSG={attrs.get('reply_to_message_id')}"
+                            f" (Omer moved to main a request {redirected} already took: FIRST stop it with"
+                            " general_handoff.py stop, listener.md Step G item 8)")
         kind, val = classify(attrs, content)
         if from_bot and kind == "none" and val == "trivial":
             kind, val = "ack", TEXT_ACK   # a bot's tag is never a greeting

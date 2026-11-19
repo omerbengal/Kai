@@ -113,6 +113,18 @@ row. This section replaces Step −2 / Step shortening for these messages:
      tagging Omer, as a reply to the request; his reply there tagging main reaches main as a normal task.
 7. **Never** tag a bot for a message that came from a bot, never answer in a bot's topic, never post
    "העברתי ל..." lines. The private chat keeps working as before.
+8. **Omer moves to main a request a bot already took = stop the bot FIRST** (19/11/2026, General msgs 5198 /
+   5201 / 5215: voice 5198 replied to the WhatsApp bot's message, so it was `reason=reply_to_bot` and the bot
+   started a transcript; Omer then wrote "התכוונתי אליך @main" as a reply to 5198, main made its own transcript
+   and never stopped the bot = two transcripts; Omer: "היית צריך לעצור את קאי וואטסאפ"). Signals: the auto-ACK
+   line carries `REDIRECT_FROM_BOT=<bot> REDIRECTED_MSG=<id>` (he tagged main as a reply to his own message that
+   went to that bot), or his words say the earlier request was meant for main ("התכוונתי אליך", "זה בשבילך").
+   Before any work, in the same block as the worker spawn (or the inline answer):
+   `python D:/Kai/scripts/general_handoff.py stop --bot <bot> --msg <REDIRECTED_MSG>` (tags the bot as a reply
+   to that message with `🛑 STOP msg=<id>`; the bot's hook turns it into `reason=main_stop`, the bot aborts its
+   worker, posts no result and closes with one `🛑` line). `DOWN` = the bot is not running, nothing to stop.
+   Put "bot <name> was told to stop (msg <id>)" in the worker's NOTES. The work itself = his ORIGINAL request
+   (REDIRECTED_MSG: download its voice / attachment), not only the redirect line.
 
 ---
 

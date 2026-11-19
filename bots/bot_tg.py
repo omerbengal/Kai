@@ -1235,6 +1235,23 @@ def _timing(bot, msg, t0, ack):
         pass
 
 
+STOP_RE = re.compile(r"🛑 STOP msg=(\d+)")   # scripts/general_handoff.py stop_text()
+
+
+def main_stop_target(bot, attrs, content):
+    """General msg id main Kai tells this bot to stop working on (general_handoff.py stop), else None."""
+    try:
+        if attrs.get("user_id") != MAIN_BOT_ID or not is_general(bot, attrs):
+            return None
+        me = (kai_bots.bot(bot).get("username") or "").lower()
+        if not me or f"@{me}" not in (content or "").lower():
+            return None
+        m = STOP_RE.search(content or "")
+        return m.group(1) if m else None
+    except Exception:
+        return None
+
+
 def auto_ack(bot, prompt, dry_run=False, sender=None, reactor=None):
     import auto_ack as main_ack
     import time as _t
@@ -1253,6 +1270,13 @@ def auto_ack(bot, prompt, dry_run=False, sender=None, reactor=None):
             # 08/11/2026: Omer tagged main Kai (also when replying to this bot's message): main owns it
             lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=NONE reason=main_tag (Omer tagged main"
                          " Kai, not you: main handles it, do NOTHING, no reply, no ACK)")
+            continue
+        stop_msg = main_stop_target(bot, attrs, content)
+        if stop_msg:
+            # 19/11/2026 (General 5198 / 5201 / 5215): Omer moved this request to main Kai, which tells us to drop it
+            lines.append(f"AUTO_ACK message_id={mid} AUTO_ACK_MSG_ID=NONE reason=main_stop STOP_TASK_MSG={stop_msg}"
+                         f" STOP_TAG_MSG={mid} (main Kai took over General msg {stop_msg}: follow CLAUDE.md"
+                         " 'A STOP from main Kai' - abort that worker, no result, no ACK)")
             continue
         from_bot = bot_name_by_id(attrs.get("user_id"))
         if from_bot == bot:

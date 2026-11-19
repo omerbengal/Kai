@@ -14,6 +14,10 @@ CLI (main Kai's dispatcher only):
   general_handoff.py answer --bot whatsapp --question <bot's General question msg id> --text "<Omer's answer>"
         Omer answered a bot's open General question with a plain message (no reply): main tags the bot as a
         reply to its question, so the bot reopens THAT task (07/11/2026, Omer msg 781). Prints TAGGED / DOWN.
+  general_handoff.py stop --bot whatsapp --msg <Omer's General msg the bot took> [--text "<why>"]
+        Omer moved that request to main Kai: tag the bot, as a reply to that message, with a STOP line its
+        CLAUDE.md honors (abort the worker, post no result, one short 🛑 line). Run it BEFORE main starts the
+        work (19/11/2026, General msgs 5198 / 5201 / 5215: both made a transcript). Prints TAGGED / DOWN.
 """
 import io
 import json
@@ -75,6 +79,25 @@ def handoff(name, text, reply_to, bots=None, up=bot_up, sender=send_general):
     return "tagged", sender(chat, f"@{cfg['username']} {text.strip()}", reply_to)
 
 
+STOP_MARK = "🛑 STOP"   # bots/_template/CLAUDE.md.tmpl keys on this exact prefix after the @username
+
+
+def stop_text(msg, reason=""):
+    why = f" {reason.strip()}" if (reason or "").strip() else ""
+    return (f"{STOP_MARK} msg={msg}: עומר העביר את הבקשה הזו לקאי הראשי. תעצור את המשימה שלה עכשיו, בלי"
+            f" לפרסם תוצאה.{why}")
+
+
+def stop(name, msg, reason="", bots=None, up=bot_up, sender=send_general):
+    """Tell a domain bot to drop the task for General message `msg` (main Kai took it over). A bot that is
+    down is not working on anything, so no notice is posted then."""
+    bots = bots if bots is not None else kai_bots.load_config()
+    cfg = bots[name]
+    if not up(cfg):
+        return "down", None
+    return "tagged", sender(str(cfg["group_id"]), f"@{cfg['username']} {stop_text(msg, reason)}", msg)
+
+
 def history(name, n=20, db_path=None):
     """What a bot said / was told lately, from the bot's OWN <home>/bot.db (its hooks save every message).
     Main Kai reads this to answer "מה הבוט עשה?" (Omer msg 22595) - no Telegram delivery, no turn, no loop."""
@@ -109,6 +132,10 @@ def main(argv):
     if cmd == "answer":
         st, mid = handoff(_arg(argv, "--bot"), _arg(argv, "--text", ""), _arg(argv, "--question"))
         print(f"{st.upper()} {mid}")
+        return 0
+    if cmd == "stop":
+        st, mid = stop(_arg(argv, "--bot"), _arg(argv, "--msg"), _arg(argv, "--text", ""))
+        print(f"{st.upper()} {mid or ''}".strip())
         return 0
     if cmd == "tag":
         st, mid = handoff(_arg(argv, "--bot"), _arg(argv, "--text", ""), _arg(argv, "--reply-to"))
