@@ -26,6 +26,10 @@ goes in THREAD_ID with `reply_to=GENERAL_TAG_MSG_ID`, and it is NOT the end (no 
 - Before each real step, edit the ACK with a one-line status (`🔍 ...`, `💾 ...`, `⚙️ ...`).
 - Hebrew, `‏` on every line, no em dash, ← not →, yes/no questions as inline buttons with the one question
   right above them. Never open a message with the bot's own name. Run the 3-question check before the final reply.
+- **A message asking Omer to check / test something carries the link he checks on, inside that same message**
+  (Omer, 19/11/2026: a check without a link is forbidden, a repeated complaint). How to produce it in your
+  domain (e.g. a preview deploy) is in `D:/KaiBots/whatsapp/CLAUDE.md`; open it once before sending. No link
+  possible = the message says why.
 - **Finish (and on error), in ONE parallel block:** the final `reply`, and
   `python D:/Kai/bots/bot_tg.py delete --bot whatsapp --chat CHAT_ID --msg ACK_MSG_ID`.
 - **A task Omer started in the bot's topic** (no `GENERAL_TAG_MSG_ID` in the block, ORIGINAL_MSG_ID is his
